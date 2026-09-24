@@ -1,0 +1,259 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Hover gating: touch devices fire a false :hover on tap, which leaves hover
+   styles stuck after the finger lifts. Every hover-driven motion goes through
+   this variant. (AppShell already used `hover-fine:` — it was undefined until
+   now, so those classes were being dropped at build time.) */
+@custom-variant hover-fine (@media (hover: hover) and (pointer: fine));
+
+@theme inline {
+  --font-sans: "Assistant", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Heebo", "Assistant", ui-sans-serif, sans-serif;
+  --color-hairline: oklch(1 0 0 / 8%);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-cat-work: var(--cat-work);
+  --color-cat-family: var(--cat-family);
+  --color-cat-health: var(--cat-health);
+  --color-cat-money: var(--cat-money);
+  --color-cat-shopping: var(--cat-shopping);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 4%), 0 8px 24px -18px oklch(0 0 0 / 22%);
+  --shadow-float: 0 8px 24px -10px oklch(0 0 0 / 22%);
+  /* ── Emil Kowalski easing curves ── */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:root {
+  --radius: 1.1rem;
+  --background: oklch(0.985 0.002 250);
+  --foreground: oklch(0.24 0.012 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.012 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.012 260);
+  --primary: oklch(0.58 0.15 250);
+  --primary-foreground: oklch(1 0 0);
+  --primary-soft: oklch(0.95 0.025 250);
+  --secondary: oklch(0.96 0.004 250);
+  --secondary-foreground: oklch(0.3 0.012 260);
+  --muted: oklch(0.96 0.004 250);
+  --muted-foreground: oklch(0.55 0.012 260);
+  --accent: oklch(0.95 0.008 250);
+  --accent-foreground: oklch(0.3 0.012 260);
+  --destructive: oklch(0.6 0.19 25);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.62 0.14 155);
+  --success-foreground: oklch(1 0 0);
+  --border: oklch(0.92 0.004 250);
+  --input: oklch(0.92 0.004 250);
+  --ring: oklch(0.58 0.15 250);
+  --cat-work: oklch(0.58 0.15 250);
+  --cat-family: oklch(0.62 0.14 350);
+  --cat-health: oklch(0.6 0.12 165);
+  --cat-money: oklch(0.68 0.13 70);
+  --cat-shopping: oklch(0.62 0.14 320);
+  --chart-1: oklch(0.58 0.15 250);
+  --chart-2: oklch(0.6 0.12 165);
+  --chart-3: oklch(0.68 0.13 70);
+  --chart-4: oklch(0.62 0.14 350);
+  --chart-5: oklch(0.6 0.1 300);
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  /* ── Mobile native: prevent pull-to-refresh and overscroll bounce ── */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  /* ── Prevent iOS input zoom (min 16px) ── */
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+
+  /* ── Press feedback on all interactive elements ── */
+  button,
+  [role="button"] {
+    transition: transform 160ms var(--ease-out);
+  }
+
+  button:active,
+  [role="button"]:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ── Keyframes ── */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Share code panel — enters from 0.96, never from nothing */
+@keyframes pop-code {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Progress bar grow-in from left ── */
+@keyframes grow-bar {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+/* ── Login ambient wash ─────────────────────────────────────────────────────
+   Two soft blobs behind the sign-in screen. Decorative: transform/opacity only,
+   pointer-events none, and the reduced-motion block below stops the drift. */
+@keyframes login-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(0, -6%, 0) scale(1.08); }
+}
+
+@utility login-glow {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(64px);
+  will-change: transform;
+}
+
+@utility login-glow-a {
+  inset-block-start: -18%;
+  inset-inline-end: -22%;
+  width: 22rem;
+  height: 22rem;
+  background: color-mix(in oklch, var(--color-primary) 22%, transparent);
+  animation: login-drift 9s var(--ease-in-out) infinite alternate;
+}
+
+@utility login-glow-b {
+  inset-block-end: -20%;
+  inset-inline-start: -25%;
+  width: 20rem;
+  height: 20rem;
+  background: color-mix(in oklch, var(--color-cat-family) 16%, transparent);
+  animation: login-drift 11s var(--ease-in-out) 1s infinite alternate-reverse;
+}
+
+/* ── Respect reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@utility app-shell {
+  margin-inline: auto;
+  max-width: 30rem;
+  min-height: 100dvh;
+  padding-bottom: 6.5rem;
+}
+
+@utility surface-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+}
+
+@utility eyebrow {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-muted-foreground);
+}
+
+/* ── Stagger list: children cascade in with fade-up ── */
+@utility stagger-list {
+  & > *:nth-child(1)  { animation: fade-up 320ms var(--ease-out) both; animation-delay: 0ms; }
+  & > *:nth-child(2)  { animation: fade-up 320ms var(--ease-out) both; animation-delay: 50ms; }
+  & > *:nth-child(3)  { animation: fade-up 320ms var(--ease-out) both; animation-delay: 100ms; }
+  & > *:nth-child(4)  { animation: fade-up 320ms var(--ease-out) both; animation-delay: 150ms; }
+  & > *:nth-child(5)  { animation: fade-up 320ms var(--ease-out) both; animation-delay: 200ms; }
+  & > *:nth-child(6)  { animation: fade-up 320ms var(--ease-out) both; animation-delay: 250ms; }
+  & > *:nth-child(n+7){ animation: fade-up 320ms var(--ease-out) both; animation-delay: 300ms; }
+}

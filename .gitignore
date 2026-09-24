@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output & caches
+.output/
+.tanstack/
+.wrangler/
+dist/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local scratch output
+Claude outputs/
+
+# Nested repo (has its own .git)
+remotion-video/
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db
