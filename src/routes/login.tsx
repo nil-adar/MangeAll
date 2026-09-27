@@ -31,7 +31,7 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [isRegister, setIsRegister] = useState(true);
+  const [isRegister, setIsRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -67,9 +67,15 @@ function LoginPage() {
     rememberChoice();
 
     if (isRegister) {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      // Supabase doesn't return an error for an email that's already
+      // registered (to avoid leaking which emails exist) — it returns a
+      // user object with an empty `identities` array instead. That's the
+      // documented way to detect this case client-side.
       if (error) setError(error.message);
-      else setMessage("נשלח אימייל אישור — בדוק את תיבת הדואר שלך");
+      else if (data.user && data.user.identities?.length === 0) {
+        setError("משתמש עם אימייל זה כבר רשום — נסה להתחבר");
+      } else setMessage("נשלח אימייל אישור — בדוק את תיבת הדואר שלך");
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setError("אימייל או סיסמה שגויים");
