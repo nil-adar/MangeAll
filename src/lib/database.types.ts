@@ -92,6 +92,17 @@ export type Database = {
         >;
         Relationships: [];
       };
+      work_days: {
+        Row: {
+          user_id: string;
+          date: string;
+          status: "office" | "home" | "off" | "sick" | "absent";
+          updated_at: string;
+        };
+        Insert: Omit<Database["public"]["Tables"]["work_days"]["Row"], "updated_at">;
+        Update: Partial<Database["public"]["Tables"]["work_days"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

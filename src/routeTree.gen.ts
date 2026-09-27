@@ -18,6 +18,7 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ShoppingRouteImport } from './routes/shopping'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as WorkdayRouteImport } from './routes/workday'
 import { Route as EventNewRouteImport } from './routes/event.new'
 import { Route as ExpenseNewRouteImport } from './routes/expense.new'
 
@@ -66,6 +67,11 @@ const TasksRoute = TasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkdayRoute = WorkdayRouteImport.update({
+  id: '/workday',
+  path: '/workday',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EventNewRoute = EventNewRouteImport.update({
   id: '/event/new',
   path: '/event/new',
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/shopping': typeof ShoppingRoute
   '/tasks': typeof TasksRoute
+  '/workday': typeof WorkdayRoute
   '/event/new': typeof EventNewRoute
   '/expense/new': typeof ExpenseNewRoute
 }
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/shopping': typeof ShoppingRoute
   '/tasks': typeof TasksRoute
+  '/workday': typeof WorkdayRoute
   '/event/new': typeof EventNewRoute
   '/expense/new': typeof ExpenseNewRoute
 }
@@ -114,6 +122,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/shopping': typeof ShoppingRoute
   '/tasks': typeof TasksRoute
+  '/workday': typeof WorkdayRoute
   '/event/new': typeof EventNewRoute
   '/expense/new': typeof ExpenseNewRoute
 }
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/shopping'
     | '/tasks'
+    | '/workday'
     | '/event/new'
     | '/expense/new'
   fileRoutesByTo: FileRoutesByTo
@@ -142,6 +152,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/shopping'
     | '/tasks'
+    | '/workday'
     | '/event/new'
     | '/expense/new'
   id:
@@ -155,6 +166,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/shopping'
     | '/tasks'
+    | '/workday'
     | '/event/new'
     | '/expense/new'
   fileRoutesById: FileRoutesById
@@ -169,6 +181,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   ShoppingRoute: typeof ShoppingRoute
   TasksRoute: typeof TasksRoute
+  WorkdayRoute: typeof WorkdayRoute
   EventNewRoute: typeof EventNewRoute
   ExpenseNewRoute: typeof ExpenseNewRoute
 }
@@ -238,6 +251,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workday': {
+      id: '/workday'
+      path: '/workday'
+      fullPath: '/workday'
+      preLoaderRoute: typeof WorkdayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/event/new': {
       id: '/event/new'
       path: '/event/new'
@@ -265,6 +285,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   ShoppingRoute: ShoppingRoute,
   TasksRoute: TasksRoute,
+  WorkdayRoute: WorkdayRoute,
   EventNewRoute: EventNewRoute,
   ExpenseNewRoute: ExpenseNewRoute,
 }

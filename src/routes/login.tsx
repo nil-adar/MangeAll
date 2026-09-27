@@ -1,15 +1,19 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig } from "lucide-react";
+import { ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/login")({
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; verified?: boolean } => {
     const r = search["redirect"];
     // Only same-app paths. "//evil.com" and "https://…" are rejected, so a
     // crafted link can't bounce someone off-site after they sign in.
-    return typeof r === "string" && /^\/(?!\/)/.test(r) ? { redirect: r } : {};
+    const out: { redirect?: string; verified?: boolean } = {};
+    if (typeof r === "string" && /^\/(?!\/)/.test(r)) out.redirect = r;
+    // Set by the signup confirmation email link (see emailRedirectTo below).
+    if (search["verified"] === 1 || search["verified"] === "1") out.verified = true;
+    return out;
   },
   component: LoginPage,
 });
@@ -25,8 +29,9 @@ const SESSION_ONLY_KEY = "nahel-hakol:session-only";
 
 function LoginPage() {
   const navigate = useNavigate();
-  const { redirect } = Route.useSearch();
+  const { redirect, verified } = Route.useSearch();
 
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -45,7 +50,22 @@ function LoginPage() {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (verified) {
+        // Arrived from the confirmation email. Supabase has already signed
+        // them in from the link's token; sign that session out so they log in
+        // themselves, with the email filled in. No session means the link was
+        // expired or already used — by then the account is usually confirmed.
+        if (data.session) {
+          setEmail(data.session.user.email ?? "");
+          await supabase.auth.signOut();
+          setMessage("החשבון אומת בהצלחה — עכשיו אפשר להתחבר");
+        } else {
+          setError("הקישור כבר נוצל או שפג תוקפו — נסה להתחבר");
+        }
+        window.history.replaceState(null, "", "/login");
+        return;
+      }
       if (data.session) goOn();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -62,12 +82,42 @@ function LoginPage() {
 
   async function handleEmailAuth(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
+
+    // The form has noValidate (so our own Hebrew messages show instead of
+    // the browser's native ones) — so `required` on the fields no longer
+    // blocks submission on its own; check it here instead.
+    if (!email.trim() || !password) {
+      setError("נא למלא אימייל וסיסמה");
+      return;
+    }
+
+    setLoading(true);
     rememberChoice();
 
     if (isRegister) {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (!name.trim()) {
+        setError("נא להזין שם מלא");
+        setLoading(false);
+        return;
+      }
+      if (password.length < 6) {
+        setError("הסיסמה חייבת להכיל לפחות 6 תווים");
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login?verified=1`,
+          // Stored on the auth user immediately (no session/RLS needed yet,
+          // unlike user_settings). useProfile() falls back to this until
+          // the user (or a future edit) writes it into user_settings.
+          data: { display_name: name.trim() },
+        },
+      });
       // Supabase doesn't return an error for an email that's already
       // registered (to avoid leaking which emails exist) — it returns a
       // user object with an empty `identities` array instead. That's the
@@ -189,9 +239,29 @@ function LoginPage() {
           ))}
         </div>
 
-        <form onSubmit={handleEmailAuth} style={{ animation: `fade-up 320ms ${EASE} 200ms both` }}>
+        <form
+          onSubmit={handleEmailAuth}
+          noValidate
+          style={{ animation: `fade-up 320ms ${EASE} 200ms both` }}
+        >
           {/* ── Fields ── one card, rows divided by a hairline ── */}
           <div className="mt-5 overflow-hidden rounded-3xl border border-border bg-card">
+            {isRegister && (
+              <>
+                <Field
+                  id="name"
+                  label="שם מלא"
+                  icon={User}
+                  type="text"
+                  autoComplete="name"
+                  placeholder="ישראל ישראלי"
+                  value={name}
+                  onChange={setName}
+                  required
+                />
+                <div className="h-px bg-border" />
+              </>
+            )}
             <Field
               id="email"
               label="אימייל"

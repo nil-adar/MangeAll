@@ -548,6 +548,99 @@ export function useDeleteExpense() {
   });
 }
 
+// ── Work days (daily "where did you work today?" check-in) ──────────────────
+
+export type WorkStatus = "office" | "home" | "off" | "sick" | "absent";
+
+export const WORK_STATUS_LABEL: Record<WorkStatus, string> = {
+  office: "במשרד",
+  home: "מהבית",
+  off: "יום חופש",
+  sick: "לא הרגשתי טוב",
+  absent: "לא הגעתי",
+};
+
+export const WORK_STATUS_ORDER: WorkStatus[] = ["office", "home", "off", "sick", "absent"];
+
+/** Counts toward "days worked" in the monthly summary — the other three don't. */
+export function isWorkedStatus(status: WorkStatus): boolean {
+  return status === "office" || status === "home";
+}
+
+export type WorkDay = {
+  date: string; // "YYYY-MM-DD", local — see todayISO()
+  status: WorkStatus;
+};
+
+/** Today's date as "YYYY-MM-DD" in the local timezone (not UTC, unlike toISOString). */
+export function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function useWorkDays() {
+  return useQuery({
+    queryKey: ["work_days"],
+    queryFn: async (): Promise<WorkDay[]> => {
+      const { data, error } = await supabase
+        .from("work_days")
+        .select("date, status")
+        .order("date", { ascending: false });
+
+      // Degrade to empty rather than failing the whole query — the table
+      // doesn't exist until workday-migration.sql runs.
+      if (error) return [];
+      return data as WorkDay[];
+    },
+  });
+}
+
+export function useSetWorkDay() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ date, status }: WorkDay) => {
+      const user_id = await requireUserId();
+      const { error } = await supabase
+        .from("work_days")
+        .upsert({ user_id, date, status }, { onConflict: "user_id,date" });
+      if (error) throw error;
+    },
+    onMutate: async ({ date, status }) => {
+      await qc.cancelQueries({ queryKey: ["work_days"] });
+      const prev = qc.getQueryData<WorkDay[]>(["work_days"]);
+      qc.setQueryData<WorkDay[]>(["work_days"], (old) => [
+        { date, status },
+        ...(old ?? []).filter((d) => d.date !== date),
+      ]);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["work_days"], ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["work_days"] }),
+  });
+}
+
+export function useClearWorkDay() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (date: string) => {
+      const { error } = await supabase.from("work_days").delete().eq("date", date);
+      if (error) throw error;
+    },
+    onMutate: async (date) => {
+      await qc.cancelQueries({ queryKey: ["work_days"] });
+      const prev = qc.getQueryData<WorkDay[]>(["work_days"]);
+      qc.setQueryData<WorkDay[]>(["work_days"], (old) => old?.filter((d) => d.date !== date) ?? []);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["work_days"], ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["work_days"] }),
+  });
+}
+
 // ── Monthly Budget (user_settings) ───────────────────────────────────────────
 
 import { DEFAULT_MONTHLY_BUDGET } from "./config";
@@ -603,7 +696,13 @@ export function useProfile() {
 
       return {
         ...base,
-        display_name: (data?.display_name as string | null) ?? null,
+        // Falls back to the name given at signup (auth user_metadata) until
+        // user_settings has its own value — set once the user edits it here,
+        // or once it's copied over some other way.
+        display_name:
+          (data?.display_name as string | null) ??
+          (auth.user?.user_metadata?.["display_name"] as string | undefined) ??
+          null,
         avatar_url: (data?.avatar_url as string | null) ?? null,
       };
     },

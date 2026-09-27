@@ -3,7 +3,8 @@ import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, Calen
 import { AppShell } from "@/components/AppShell";
 import { useBirthdays } from "@/components/BirthdayList";
 import { useScope, inScope } from "@/lib/scope";
-import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth } from "@/lib/queries";
+import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO } from "@/lib/queries";
+import { WorkStatusButtons, WorkStatusChip } from "@/components/WorkDayPicker";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
 import { taskBucket, daysLate, lateLabel, BUCKET_LABEL, BUCKET_ORDER } from "@/lib/task-status";
 import { useState, useEffect, useRef } from "react";
@@ -115,6 +116,11 @@ function Today() {
   const { data: monthlyBudget = DEFAULT_MONTHLY_BUDGET } = useMonthlyBudget();
   const toggle = useToggleTask();
   const { birthdays } = useBirthdays();
+  const { data: workDays = [] } = useWorkDays();
+  const setWorkDay = useSetWorkDay();
+  const today = todayISO();
+  const todayStatus = workDays.find((d) => d.date === today)?.status ?? null;
+  const [editingToday, setEditingToday] = useState(false);
 
   // Prefer what's imminent, but never show an empty card: if nothing falls in
   // the next 30 days, show the nearest ones anyway. (Birthdays with no month
@@ -306,6 +312,46 @@ function Today() {
       `}</style>
 
       <div className="space-y-7 pb-10">
+
+        {/* ── Daily work-status question ── */}
+        <section
+          className="surface-card rounded-3xl p-5"
+          style={{ animation: `fade-up 280ms ${ease} 10ms both` }}
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <p className="eyebrow">איפה עבדת היום?</p>
+            <Link
+              to="/workday"
+              className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-primary transition-[transform,opacity] duration-[140ms] active:scale-[0.90]"
+              style={{ transitionTimingFunction: ease }}
+            >
+              יומן
+              <ArrowLeft className="size-3" />
+            </Link>
+          </div>
+
+          {todayStatus && !editingToday ? (
+            <div className="flex items-center justify-between">
+              <WorkStatusChip status={todayStatus} />
+              <button
+                type="button"
+                onClick={() => setEditingToday(true)}
+                className="text-xs font-bold text-muted-foreground transition-colors duration-150 hover-fine:hover:text-primary"
+              >
+                שינוי
+              </button>
+            </div>
+          ) : (
+            <WorkStatusButtons
+              value={todayStatus}
+              disabled={setWorkDay.isPending}
+              onSelect={(status) => {
+                setWorkDay.mutate({ date: today, status });
+                setEditingToday(false);
+              }}
+            />
+          )}
+        </section>
 
         {/* ── Stat chips ── */}
         {(todayTaskCount > 0 || lateTaskCount > 0 || urgentCount > 0 || weekEventCount > 0) && (

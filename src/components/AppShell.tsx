@@ -51,6 +51,7 @@ const PARENT: Record<string, string> = {
   "/event/new": "/calendar",
   "/expense/new": "/finance",
   "/profile": "/",
+  "/workday": "/",
 };
 
 function parentOf(pathname: string): string {
