@@ -10,20 +10,24 @@
 
 
 -- ─── 1. TABLE ────────────────────────────────────────────────────────────────
--- One row per user per day. status is one of: office / home / off / sick / absent
--- (see WORK_STATUS in src/lib/queries.ts — keep the two in sync).
+-- One row per user per day. status is one of: office / home / off / sick /
+-- absent / other (see WORK_STATUS_ORDER in src/lib/queries.ts — keep in sync).
+-- note is a free-text reason, only meaningful when status = 'other'
+-- (e.g. "עבודה מאתר אחר").
 
 CREATE TABLE IF NOT EXISTS public.work_days (
   user_id    uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
   date       date NOT NULL,
   status     text NOT NULL,
+  note       text,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, date)
 );
+ALTER TABLE public.work_days ADD COLUMN IF NOT EXISTS note text;
 
 ALTER TABLE public.work_days DROP CONSTRAINT IF EXISTS work_days_status_check;
 ALTER TABLE public.work_days ADD CONSTRAINT work_days_status_check
-  CHECK (status IN ('office', 'home', 'off', 'sick', 'absent'));
+  CHECK (status IN ('office', 'home', 'off', 'sick', 'absent', 'other'));
 
 
 -- ─── 2. INDEXES ──────────────────────────────────────────────────────────────

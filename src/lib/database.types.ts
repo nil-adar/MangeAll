@@ -96,7 +96,8 @@ export type Database = {
         Row: {
           user_id: string;
           date: string;
-          status: "office" | "home" | "off" | "sick" | "absent";
+          status: "office" | "home" | "off" | "sick" | "absent" | "other";
+          note: string | null;
           updated_at: string;
         };
         Insert: Omit<Database["public"]["Tables"]["work_days"]["Row"], "updated_at">;

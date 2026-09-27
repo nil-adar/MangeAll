@@ -89,7 +89,7 @@ export function AppShell({
 
   return (
     <div className="app-shell bg-background">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 px-5 pb-3 pt-5 backdrop-blur-xl">
+      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 px-5 pb-3 pt-5 backdrop-blur-xl print:hidden">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             {!isTabPage && (
@@ -160,7 +160,7 @@ export function AppShell({
 
       <main className="px-5 pt-4 pb-24">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-[30rem] border-t border-border/70 bg-background/85 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
+      <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-[30rem] border-t border-border/70 bg-background/85 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl print:hidden">
         <ul className="flex items-end justify-between">
           {tabs.slice(0, 2).map((t) => (
             <NavTab key={t.to} {...t} active={pathname === t.to} />

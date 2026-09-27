@@ -214,6 +214,13 @@
   animation: login-drift 11s var(--ease-in-out) 1s infinite alternate-reverse;
 }
 
+/* ── Print ── used by /workday's exportable report */
+@media print {
+  @page {
+    margin: 1.5cm;
+  }
+}
+
 /* ── Respect reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -1,4 +1,5 @@
-import { Building2, House, Palmtree, Thermometer, UserX } from "lucide-react";
+import { useState } from "react";
+import { Building2, House, Palmtree, Thermometer, UserX, MoreHorizontal } from "lucide-react";
 import { WORK_STATUS_LABEL, WORK_STATUS_ORDER, type WorkStatus } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -12,20 +13,63 @@ const STYLE: Record<WorkStatus, { icon: typeof Building2; soft: string; solid: s
   off: { icon: Palmtree, soft: "bg-sky-500/10 text-sky-600", solid: "bg-sky-500 text-white" },
   sick: { icon: Thermometer, soft: "bg-amber-500/10 text-amber-600", solid: "bg-amber-500 text-white" },
   absent: { icon: UserX, soft: "bg-red-500/10 text-red-500", solid: "bg-red-500 text-white" },
+  other: { icon: MoreHorizontal, soft: "bg-violet-500/10 text-violet-600", solid: "bg-violet-500 text-white" },
 };
 
 const ease = "cubic-bezier(0.23, 1, 0.32, 1)";
 
-/** Row of 5 tap targets — one per work status. */
+/**
+ * Row of 6 tap targets — one per work status. Tapping "אחר" doesn't fire
+ * immediately: it opens a one-line note field first (e.g. "עבודה מאתר אחר"),
+ * so the free-text reason is captured together with the status in one save.
+ */
 export function WorkStatusButtons({
   value,
+  valueNote,
   onSelect,
   disabled,
 }: {
   value?: WorkStatus | null | undefined;
-  onSelect: (status: WorkStatus) => void;
+  valueNote?: string | null | undefined;
+  onSelect: (status: WorkStatus, note: string | null) => void;
   disabled?: boolean;
 }) {
+  // Non-null while composing the "אחר" note; null means "not composing".
+  const [noteDraft, setNoteDraft] = useState<string | null>(null);
+
+  if (noteDraft !== null) {
+    return (
+      <div className="space-y-2.5">
+        <input
+          autoFocus
+          dir="rtl"
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          placeholder="לדוגמה: עבודה מאתר אחר"
+          className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+        />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect("other", noteDraft.trim() || null)}
+            className="flex-1 rounded-xl bg-primary py-2 text-sm font-bold text-primary-foreground transition-transform duration-150 active:scale-[0.97] disabled:opacity-50"
+            style={{ transitionTimingFunction: ease }}
+          >
+            שמירה
+          </button>
+          <button
+            type="button"
+            onClick={() => setNoteDraft(null)}
+            className="rounded-xl px-4 py-2 text-sm font-bold text-muted-foreground"
+          >
+            ביטול
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-3 gap-2">
       {WORK_STATUS_ORDER.map((status) => {
@@ -36,7 +80,9 @@ export function WorkStatusButtons({
             key={status}
             type="button"
             disabled={disabled}
-            onClick={() => onSelect(status)}
+            onClick={() =>
+              status === "other" ? setNoteDraft(valueNote ?? "") : onSelect(status, null)
+            }
             className={cn(
               "flex flex-col items-center gap-1.5 rounded-2xl px-2 py-3 text-[11px] font-bold transition-[transform,background-color,color] duration-150 active:scale-[0.95] disabled:opacity-50",
               selected ? solid : cn(soft, "hover-fine:hover:brightness-95")
@@ -44,7 +90,7 @@ export function WorkStatusButtons({
             style={{ transitionTimingFunction: ease }}
           >
             <Icon className="size-5" />
-            {WORK_STATUS_LABEL[status]}
+            {status === "other" && selected && valueNote ? valueNote : WORK_STATUS_LABEL[status]}
           </button>
         );
       })}
@@ -53,12 +99,12 @@ export function WorkStatusButtons({
 }
 
 /** Compact read-only badge for an already-set day. */
-export function WorkStatusChip({ status }: { status: WorkStatus }) {
+export function WorkStatusChip({ status, note }: { status: WorkStatus; note?: string | null }) {
   const { icon: Icon, soft } = STYLE[status];
   return (
     <span className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold", soft)}>
       <Icon className="size-3.5 shrink-0" />
-      {WORK_STATUS_LABEL[status]}
+      {status === "other" && note ? note : WORK_STATUS_LABEL[status]}
     </span>
   );
 }

@@ -119,7 +119,9 @@ function Today() {
   const { data: workDays = [] } = useWorkDays();
   const setWorkDay = useSetWorkDay();
   const today = todayISO();
-  const todayStatus = workDays.find((d) => d.date === today)?.status ?? null;
+  const todayEntry = workDays.find((d) => d.date === today);
+  const todayStatus = todayEntry?.status ?? null;
+  const todayNote = todayEntry?.note ?? null;
   const [editingToday, setEditingToday] = useState(false);
   const workedDaysThisMonth = workDays.filter(
     (d) => isThisMonth(d.date) && isWorkedStatus(d.status)
@@ -336,7 +338,7 @@ function Today() {
           {todayStatus && !editingToday ? (
             <div>
               <div className="flex items-center justify-between">
-                <WorkStatusChip status={todayStatus} />
+                <WorkStatusChip status={todayStatus} note={todayNote} />
                 <button
                   type="button"
                   onClick={() => setEditingToday(true)}
@@ -352,9 +354,10 @@ function Today() {
           ) : (
             <WorkStatusButtons
               value={todayStatus}
+              valueNote={todayNote}
               disabled={setWorkDay.isPending}
-              onSelect={(status) => {
-                setWorkDay.mutate({ date: today, status });
+              onSelect={(status, note) => {
+                setWorkDay.mutate({ date: today, status, note });
                 setEditingToday(false);
               }}
             />

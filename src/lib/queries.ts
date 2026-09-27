@@ -550,7 +550,7 @@ export function useDeleteExpense() {
 
 // ── Work days (daily "where did you work today?" check-in) ──────────────────
 
-export type WorkStatus = "office" | "home" | "off" | "sick" | "absent";
+export type WorkStatus = "office" | "home" | "off" | "sick" | "absent" | "other";
 
 export const WORK_STATUS_LABEL: Record<WorkStatus, string> = {
   office: "במשרד",
@@ -558,18 +558,23 @@ export const WORK_STATUS_LABEL: Record<WorkStatus, string> = {
   off: "יום חופש",
   sick: "לא הרגשתי טוב",
   absent: "לא הגעתי",
+  other: "אחר",
 };
 
-export const WORK_STATUS_ORDER: WorkStatus[] = ["office", "home", "off", "sick", "absent"];
+export const WORK_STATUS_ORDER: WorkStatus[] = ["office", "home", "off", "sick", "absent", "other"];
 
-/** Counts toward "days worked" in the monthly summary — the other three don't. */
+/** Counts toward "days worked" in the monthly summary — the other three don't.
+ *  "other" counts too: its main use case (per the note) is things like
+ *  working from a client site, which is still a work day. */
 export function isWorkedStatus(status: WorkStatus): boolean {
-  return status === "office" || status === "home";
+  return status === "office" || status === "home" || status === "other";
 }
 
 export type WorkDay = {
   date: string; // "YYYY-MM-DD", local — see todayISO()
   status: WorkStatus;
+  /** Free-text reason, only meaningful when status === "other" (e.g. "עבודה מאתר אחר"). */
+  note: string | null;
 };
 
 /** Today's date as "YYYY-MM-DD" in the local timezone (not UTC, unlike toISOString). */
@@ -584,7 +589,7 @@ export function useWorkDays() {
     queryFn: async (): Promise<WorkDay[]> => {
       const { data, error } = await supabase
         .from("work_days")
-        .select("date, status")
+        .select("date, status, note")
         .order("date", { ascending: false });
 
       // Degrade to empty rather than failing the whole query — the table
@@ -598,18 +603,18 @@ export function useWorkDays() {
 export function useSetWorkDay() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ date, status }: WorkDay) => {
+    mutationFn: async ({ date, status, note }: WorkDay) => {
       const user_id = await requireUserId();
       const { error } = await supabase
         .from("work_days")
-        .upsert({ user_id, date, status }, { onConflict: "user_id,date" });
+        .upsert({ user_id, date, status, note: note ?? null }, { onConflict: "user_id,date" });
       if (error) throw error;
     },
-    onMutate: async ({ date, status }) => {
+    onMutate: async ({ date, status, note }) => {
       await qc.cancelQueries({ queryKey: ["work_days"] });
       const prev = qc.getQueryData<WorkDay[]>(["work_days"]);
       qc.setQueryData<WorkDay[]>(["work_days"], (old) => [
-        { date, status },
+        { date, status, note },
         ...(old ?? []).filter((d) => d.date !== date),
       ]);
       return { prev };
