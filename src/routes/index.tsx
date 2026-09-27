@@ -3,7 +3,7 @@ import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, Calen
 import { AppShell } from "@/components/AppShell";
 import { useBirthdays } from "@/components/BirthdayList";
 import { useScope, inScope } from "@/lib/scope";
-import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO } from "@/lib/queries";
+import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus } from "@/lib/queries";
 import { WorkStatusButtons, WorkStatusChip } from "@/components/WorkDayPicker";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
 import { taskBucket, daysLate, lateLabel, BUCKET_LABEL, BUCKET_ORDER } from "@/lib/task-status";
@@ -121,6 +121,9 @@ function Today() {
   const today = todayISO();
   const todayStatus = workDays.find((d) => d.date === today)?.status ?? null;
   const [editingToday, setEditingToday] = useState(false);
+  const workedDaysThisMonth = workDays.filter(
+    (d) => isThisMonth(d.date) && isWorkedStatus(d.status)
+  ).length;
 
   // Prefer what's imminent, but never show an empty card: if nothing falls in
   // the next 30 days, show the nearest ones anyway. (Birthdays with no month
@@ -331,15 +334,20 @@ function Today() {
           </div>
 
           {todayStatus && !editingToday ? (
-            <div className="flex items-center justify-between">
-              <WorkStatusChip status={todayStatus} />
-              <button
-                type="button"
-                onClick={() => setEditingToday(true)}
-                className="text-xs font-bold text-muted-foreground transition-colors duration-150 hover-fine:hover:text-primary"
-              >
-                שינוי
-              </button>
+            <div>
+              <div className="flex items-center justify-between">
+                <WorkStatusChip status={todayStatus} />
+                <button
+                  type="button"
+                  onClick={() => setEditingToday(true)}
+                  className="text-xs font-bold text-muted-foreground transition-colors duration-150 hover-fine:hover:text-primary"
+                >
+                  שינוי
+                </button>
+              </div>
+              <p className="mt-3.5 text-xs text-muted-foreground">
+                עבדת <span className="font-bold text-foreground">{workedDaysThisMonth}</span> ימים החודש
+              </p>
             </div>
           ) : (
             <WorkStatusButtons
