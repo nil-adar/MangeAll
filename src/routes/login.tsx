@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig, User } from "lucide-react";
+import { ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig, User, ListChecks, CalendarDays, ShoppingCart, Wallet, Briefcase } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -20,12 +20,44 @@ export const Route = createFileRoute("/login")({
 
 const EASE = "var(--ease-out)";
 
+const FEATURES = [
+  { label: "משימות", icon: ListChecks },
+  { label: "יומן וימי הולדת", icon: CalendarDays },
+  { label: "רשימת קניות משותפת", icon: ShoppingCart },
+  { label: "הוצאות ותקציב", icon: Wallet },
+  { label: "ימי עבודה", icon: Briefcase },
+] as const;
+
 /**
  * "Remember me", implemented rather than decorative: unchecked marks the
  * session as this-session-only, and AuthGuard signs out when the browser is
  * reopened. See SESSION_ONLY_KEY in routes/__root.tsx.
  */
 const SESSION_ONLY_KEY = "nahel-hakol:session-only";
+
+/**
+ * Set once anyone has signed in (or signed up) from this device — here and in
+ * AuthGuard (routes/__root.tsx). The page opens on login for them and on
+ * sign-up for a first-time visitor, who would otherwise land on "טוב לראות
+ * אותך שוב" with no account to log into.
+ */
+const KNOWN_DEVICE_KEY = "nahel-hakol:has-account";
+
+function isKnownDevice(): boolean {
+  try {
+    return localStorage.getItem(KNOWN_DEVICE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markKnownDevice() {
+  try {
+    localStorage.setItem(KNOWN_DEVICE_KEY, "1");
+  } catch {
+    /* storage blocked — next visit simply opens on sign-up again */
+  }
+}
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -34,9 +66,10 @@ function LoginPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [isRegister, setIsRegister] = useState(false);
+  const [isRegister, setIsRegister] = useState(() => !verified && !isKnownDevice());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -52,6 +85,7 @@ function LoginPage() {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
       if (verified) {
+        markKnownDevice();
         // Arrived from the confirmation email. Supabase has already signed
         // them in from the link's token; sign that session out so they log in
         // themselves, with the email filled in. No session means the link was
@@ -66,7 +100,10 @@ function LoginPage() {
         window.history.replaceState(null, "", "/login");
         return;
       }
-      if (data.session) goOn();
+      if (data.session) {
+        markKnownDevice();
+        goOn();
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate]);
@@ -106,6 +143,11 @@ function LoginPage() {
         setLoading(false);
         return;
       }
+      if (password !== confirmPassword) {
+        setError("הסיסמאות אינן תואמות");
+        setLoading(false);
+        return;
+      }
 
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -125,11 +167,23 @@ function LoginPage() {
       if (error) setError(error.message);
       else if (data.user && data.user.identities?.length === 0) {
         setError("משתמש עם אימייל זה כבר רשום — נסה להתחבר");
-      } else setMessage("נשלח אימייל אישור — בדוק את תיבת הדואר שלך");
+      } else {
+        markKnownDevice();
+        setMessage("נשלח אימייל אישור — בדוק את תיבת הדואר שלך");
+      }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setError("אימייל או סיסמה שגויים");
-      else goOn();
+      // An unconfirmed account is not a wrong password — saying so sends
+      // people to "forgot password" instead of their inbox.
+      if (error?.code === "email_not_confirmed")
+        setError("צריך לאשר את האימייל קודם — חפש את מייל האימות בתיבת הדואר (וגם בספאם)");
+      else if (error?.code === "over_request_rate_limit")
+        setError("יותר מדי ניסיונות — נסה שוב בעוד כמה דקות");
+      else if (error) setError("אימייל או סיסמה שגויים");
+      else {
+        markKnownDevice();
+        goOn();
+      }
     }
     setLoading(false);
   }
@@ -187,7 +241,20 @@ function LoginPage() {
             <CircleCheckBig className="size-10" strokeWidth={2.2} />
           </span>
           <p className="mt-4 font-display text-2xl font-extrabold leading-none">נהל הכל</p>
-          <p className="mt-2 text-sm text-muted-foreground">היום שלך, מסודר</p>
+          <p className="mt-2 text-sm text-muted-foreground">כל מה שהיום צריך, באפליקציה אחת</p>
+          {/* What the app actually does — a first-time visitor lands here before
+              anything else, so this is the only place to say it. */}
+          <ul className="mt-4 flex flex-wrap justify-center gap-1.5" aria-label="מה יש באפליקציה">
+            {FEATURES.map(({ label, icon: Icon }) => (
+              <li
+                key={label}
+                className="flex items-center gap-1.5 rounded-full bg-primary/8 px-3 py-1 text-xs font-semibold text-primary"
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </li>
+            ))}
+          </ul>
         </div>
 
         {/* ── Title ── centred under the mark so the header reads as one block ── */}
@@ -298,6 +365,22 @@ function LoginPage() {
                 </button>
               }
             />
+            {isRegister && (
+              <>
+                <div className="h-px bg-border" />
+                <Field
+                  id="confirm-password"
+                  label="אימות סיסמה"
+                  icon={Lock}
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  placeholder="הקלד/י שוב את הסיסמה"
+                  value={confirmPassword}
+                  onChange={setConfirmPassword}
+                  required
+                />
+              </>
+            )}
           </div>
 
           {/* ── Remember + forgot ── */}
@@ -368,6 +451,22 @@ function LoginPage() {
             />
           </button>
         </form>
+
+        {/* ── Switch mode ── the page opens on login, so a first-time visitor
+            needs an obvious way across to sign-up right under the button. */}
+        <button
+          type="button"
+          onClick={() => switchMode(!isRegister)}
+          className="group mx-auto mt-4 flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm text-muted-foreground transition-colors duration-150 hover-fine:hover:bg-muted"
+          style={{ transitionTimingFunction: EASE }}
+        >
+          {isRegister ? "כבר יש לך חשבון?" : "עוד לא רשום?"}
+          <span className="font-bold text-primary">{isRegister ? "כניסה" : "הרשמה בחינם"}</span>
+          <ArrowLeft
+            className="size-4 text-primary transition-transform duration-150 hover-fine:group-hover:-translate-x-1"
+            style={{ transitionTimingFunction: EASE }}
+          />
+        </button>
 
         {/* ── Google ── */}
         <div className="mt-5" style={{ animation: `fade-up 320ms ${EASE} 260ms both` }}>

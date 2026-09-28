@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, CalendarDays, ListChecks } from "lucide-react";
+import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, CalendarDays, ListChecks, ShoppingCart, Receipt, Briefcase, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useBirthdays } from "@/components/BirthdayList";
 import { useScope, inScope } from "@/lib/scope";
-import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus } from "@/lib/queries";
+import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus, useShoppingItems } from "@/lib/queries";
+import { getHistory } from "@/lib/shopping-smart";
 import { WorkStatusButtons, WorkStatusChip } from "@/components/WorkDayPicker";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
 import { taskBucket, daysLate, lateLabel, BUCKET_LABEL, BUCKET_ORDER } from "@/lib/task-status";
@@ -116,7 +117,8 @@ function Today() {
   const { data: monthlyBudget = DEFAULT_MONTHLY_BUDGET } = useMonthlyBudget();
   const toggle = useToggleTask();
   const { birthdays } = useBirthdays();
-  const { data: workDays = [] } = useWorkDays();
+  const { data: workDays = [], isLoading: workDaysLoading } = useWorkDays();
+  const { data: shoppingItems = [], isLoading: shoppingLoading } = useShoppingItems();
   const setWorkDay = useSetWorkDay();
   const today = todayISO();
   const todayEntry = workDays.find((d) => d.date === today);
@@ -318,6 +320,17 @@ function Today() {
 
       <div className="space-y-7 pb-10">
 
+        <GettingStarted
+          ready={!workDaysLoading && !shoppingLoading}
+          done={{
+            task: tasks.length > 0,
+            event: events.length > 0,
+            shopping: shoppingItems.length > 0 || Object.keys(getHistory()).length > 0,
+            expense: expenses.length > 0,
+            workday: workDays.length > 0,
+          }}
+        />
+
         {/* ── Daily work-status question ── */}
         <section
           className="surface-card rounded-3xl p-5"
@@ -330,7 +343,7 @@ function Today() {
               className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-primary transition-[transform,opacity] duration-[140ms] active:scale-[0.90]"
               style={{ transitionTimingFunction: ease }}
             >
-              יומן
+              כל החודש
               <ArrowLeft className="size-3" />
             </Link>
           </div>
@@ -500,7 +513,7 @@ function Today() {
           <SectionTitle title="משימות" to="/tasks" />
 
           {taskGroups.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground pr-1">אין משימות פתוחות</p>
+            <EmptyHint text="אין משימות פתוחות" action="הוספת משימה" to="/event/new" search={{ type: "task" }} />
           ) : (
             <div className="mt-4 space-y-6">
               {taskGroups.map((g) => (
@@ -581,7 +594,7 @@ function Today() {
           <SectionTitle title="לו&quot;ז השבוע" to="/calendar" />
 
           {weekSlots.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground pr-1">אין אירועים השבוע</p>
+            <EmptyHint text="אין אירועים השבוע" action="הוספת אירוע" to="/event/new" search={{ type: "event" }} />
           ) : (
             <div className="mt-4 space-y-6">
               {weekSlots.map((slot) => (
@@ -751,6 +764,150 @@ function Today() {
 
       </div>
     </AppShell>
+  );
+}
+
+// ── First-run guide ──────────────────────────────────────────────────────────
+// A new account opens to empty sections, which says nothing about what the app
+// is for. This card names each area and links straight into it; a step ticks
+// itself off once that area has data, and the card goes away when every step
+// is done or the user hides it.
+
+const ONBOARDING_KEY = "nahel-hakol:onboarding-dismissed";
+
+type StepKey = "task" | "event" | "shopping" | "expense" | "workday";
+
+const STEPS: Array<{
+  key: StepKey;
+  icon: typeof ListChecks;
+  title: string;
+  desc: string;
+  to: string;
+  search?: Record<string, string>;
+}> = [
+  { key: "task", icon: ListChecks, title: "משימה ראשונה", desc: "מה צריך לעשות היום או השבוע", to: "/event/new", search: { type: "task" } },
+  { key: "event", icon: CalendarDays, title: "אירוע או יום הולדת", desc: "פגישות, תורים וימי הולדת בלוח אחד", to: "/event/new", search: { type: "event" } },
+  { key: "shopping", icon: ShoppingCart, title: "רשימת קניות", desc: "כותבים ״3 חלב״ והיא מסתדרת לפי הסופר", to: "/shopping" },
+  { key: "expense", icon: Receipt, title: "הוצאה ראשונה", desc: "רואים כמה נשאר מהתקציב החודשי", to: "/expense/new", search: { mode: "once" } },
+  { key: "workday", icon: Briefcase, title: "יום עבודה", desc: "משרד, בית או חופש, בלחיצה אחת", to: "/workday" },
+];
+
+function GettingStarted({ ready, done }: { ready: boolean; done: Record<StepKey, boolean> }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const count = STEPS.filter((s) => done[s.key]).length;
+  if (!ready || dismissed || count === STEPS.length) return null;
+
+  function dismiss() {
+    try {
+      localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      /* storage blocked — hidden for this visit only */
+    }
+    setDismissed(true);
+  }
+
+  return (
+    <section
+      className="surface-card rounded-3xl p-5"
+      style={{ animation: `fade-up 280ms ${ease} both` }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="eyebrow">ברוכים הבאים לנהל הכל</p>
+          <h2 className="mt-1.5 text-[1.3rem] font-extrabold leading-tight tracking-tight">
+            כל היום שלך, במקום אחד
+          </h2>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="הסתרת המדריך"
+          className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover-fine:hover:bg-muted"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">
+        משימות, יומן, רשימת קניות, הוצאות וימי עבודה. בוחרים מאיפה להתחיל:
+      </p>
+
+      <div className="mt-4 flex items-center gap-3">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-500"
+            style={{ width: `${(count / STEPS.length) * 100}%`, transitionTimingFunction: ease }}
+          />
+        </div>
+        <span className="text-xs font-bold tabular-nums text-muted-foreground">
+          {count}/{STEPS.length}
+        </span>
+      </div>
+
+      <ul className="mt-4 space-y-2">
+        {STEPS.map((s) => {
+          const isDone = done[s.key];
+          return (
+            <li key={s.key}>
+              <Link
+                to={s.to}
+                search={s.search as never}
+                className="flex items-center gap-3 rounded-2xl bg-muted/60 p-3 transition-[transform,background-color] duration-[140ms] active:scale-[0.98] hover-fine:hover:bg-muted"
+                style={{ transitionTimingFunction: ease }}
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <s.icon className="size-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={`block text-sm font-bold ${isDone ? "text-muted-foreground line-through" : ""}`}>
+                    {s.title}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">{s.desc}</span>
+                </span>
+                {isDone ? (
+                  <CheckCircle2 className="size-5 shrink-0 fill-primary text-primary-foreground" />
+                ) : (
+                  <ArrowLeft className="size-4 shrink-0 text-primary" />
+                )}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** Empty section that says what to do next, not just that there's nothing. */
+function EmptyHint({
+  text,
+  action,
+  to,
+  search,
+}: {
+  text: string;
+  action: string;
+  to: string;
+  search: Record<string, string>;
+}) {
+  return (
+    <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-dashed border-border/80 px-4 py-3.5">
+      <p className="text-sm text-muted-foreground">{text}</p>
+      <Link
+        to={to}
+        search={search as never}
+        className="shrink-0 text-xs font-bold text-primary transition-transform duration-[140ms] active:scale-[0.94]"
+        style={{ transitionTimingFunction: ease }}
+      >
+        + {action}
+      </Link>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Plus, Receipt, RefreshCw, Sparkles, Pencil, Trash2, Check, X } from "lucide-react";
+import { Receipt, RefreshCw, Sparkles, Pencil, Trash2, Check, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import {
   useExpenses,
@@ -241,14 +241,6 @@ function FinancePage() {
           </div>
         </>
       )}
-
-      <Link
-        to="/expense/new"
-        search={{ mode: "once" } as never}
-        className="fixed bottom-24 left-5 z-20 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition active:scale-95"
-      >
-        <Plus className="size-5" />
-      </Link>
     </AppShell>
   );
 }

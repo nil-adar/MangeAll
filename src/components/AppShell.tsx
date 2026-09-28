@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { CalendarDays, CheckCircle2, Home, Plus, Wallet, Camera, CalendarPlus, ListPlus, Receipt, ShoppingCart, Cake, Repeat, LogOut, ChevronRight, User } from "lucide-react";
+import { CalendarDays, Home, Plus, Wallet, Camera, CalendarPlus, ListPlus, Receipt, ShoppingCart, Cake, Repeat, LogOut, ChevronRight, User, Briefcase } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { ScopeSwitch } from "@/lib/scope";
@@ -21,21 +21,46 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 
+// Four tabs, two on each side, so the + sits in the true centre of the bar.
+// Calendar and tasks share one "יומן" tab and switch between each other
+// with the segmented control in the header (see PLANNER below).
 const tabs = [
-  { to: "/", label: "היום", icon: Home },
-  { to: "/calendar", label: "לוח שנה", icon: CalendarDays },
-  { to: "/tasks", label: "משימות", icon: CheckCircle2 },
-  { to: "/finance", label: "כספים", icon: Wallet },
-  { to: "/shopping", label: "קניות", icon: ShoppingCart },
+  { to: "/", label: "היום", icon: Home, match: ["/"] },
+  { to: "/calendar", label: "יומן", icon: CalendarDays, match: ["/calendar", "/tasks"] },
+  { to: "/shopping", label: "קניות", icon: ShoppingCart, match: ["/shopping"] },
+  { to: "/finance", label: "כספים", icon: Wallet, match: ["/finance"] },
 ] as const;
 
-const quickActions = [
-  { label: "אירוע חדש", icon: CalendarPlus, to: "/event/new", search: { type: "event" } },
-  { label: "יום הולדת", icon: Cake, to: "/event/new", search: { type: "birthday" } },
-  { label: "משימה חדשה", icon: ListPlus, to: "/event/new", search: { type: "task" } },
-  { label: "הוצאה קבועה", icon: Repeat, to: "/expense/new", search: { mode: "fixed" } },
-  { label: "הוצאה מזדמנת", icon: Receipt, to: "/expense/new", search: { mode: "once" } },
-  { label: "סריקת קבלה", icon: Camera, to: "/expense/new", search: { mode: "scan" } },
+const PLANNER = [
+  { to: "/calendar", label: "לוח שנה" },
+  { to: "/tasks", label: "משימות" },
+] as const;
+
+// Grouped by area so the sheet reads as "what kind of thing", not a flat list.
+const quickGroups = [
+  {
+    title: "יומן ומשימות",
+    items: [
+      { label: "משימה", icon: ListPlus, to: "/event/new", search: { type: "task" } },
+      { label: "אירוע", icon: CalendarPlus, to: "/event/new", search: { type: "event" } },
+      { label: "יום הולדת", icon: Cake, to: "/event/new", search: { type: "birthday" } },
+    ],
+  },
+  {
+    title: "כסף",
+    items: [
+      { label: "הוצאה מזדמנת", icon: Receipt, to: "/expense/new", search: { mode: "once" } },
+      { label: "הוצאה קבועה", icon: Repeat, to: "/expense/new", search: { mode: "fixed" } },
+      { label: "סריקת קבלה", icon: Camera, to: "/expense/new", search: { mode: "scan" } },
+    ],
+  },
+  {
+    title: "עוד",
+    items: [
+      { label: "פריט לקניות", icon: ShoppingCart, to: "/shopping", search: undefined },
+      { label: "יום עבודה", icon: Briefcase, to: "/workday", search: undefined },
+    ],
+  },
 ] as const;
 
 /**
@@ -70,7 +95,8 @@ export function AppShell({
   children: ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isTabPage = tabs.some((t) => t.to === pathname);
+  const isTabPage = tabs.some((t) => (t.match as readonly string[]).includes(pathname));
+  const isPlanner = PLANNER.some((p) => p.to === pathname);
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { data: profile } = useProfile();
@@ -103,7 +129,14 @@ export function AppShell({
               </button>
             )}
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold tracking-tight truncate">{title}</h1>
+              {isPlanner ? (
+                <>
+                  <h1 className="sr-only">{title}</h1>
+                  <PlannerSwitch pathname={pathname} />
+                </>
+              ) : (
+                <h1 className="text-2xl font-bold tracking-tight truncate">{title}</h1>
+              )}
               {subtitle && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
             </div>
           </div>
@@ -163,7 +196,7 @@ export function AppShell({
       <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-[30rem] border-t border-border/70 bg-background/85 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl print:hidden">
         <ul className="flex items-end justify-between">
           {tabs.slice(0, 2).map((t) => (
-            <NavTab key={t.to} {...t} active={pathname === t.to} />
+            <NavTab key={t.to} to={t.to} label={t.label} icon={t.icon} active={(t.match as readonly string[]).includes(pathname)} />
           ))}
 
           <li className="-mt-7">
@@ -179,32 +212,29 @@ export function AppShell({
                 <DrawerHeader className="text-right">
                   <DrawerTitle>מה נוסיף?</DrawerTitle>
                 </DrawerHeader>
-                <div className="grid grid-cols-2 gap-3 p-4 pb-8 stagger-list">
-                  {quickActions.map((a) => {
-                    const inner = (
-                      <>
-                        <span className="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary">
-                          <a.icon className="size-5" />
-                        </span>
-                        <span className="text-sm font-semibold">{a.label}</span>
-                      </>
-                    );
-                    const className =
-                      "flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-4 text-right shadow-[var(--shadow-card)] transition-[transform,background-color] duration-[160ms] active:scale-[0.97] active:bg-muted";
-                    return (
-                      <Link
-                        key={a.label}
-                        to={a.to}
-                        search={a.search as never}
-                        onClick={() => setOpen(false)}
-                        className={className}
-                        style={{ transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)" }}
-                      >
-                        {inner}
-                      </Link>
-                    );
-
-                  })}
+                <div className="space-y-5 p-4 pb-8">
+                  {quickGroups.map((g) => (
+                    <div key={g.title}>
+                      <p className="eyebrow mb-2.5">{g.title}</p>
+                      <div className="grid grid-cols-3 gap-2.5">
+                        {g.items.map((a) => (
+                          <Link
+                            key={a.label}
+                            to={a.to}
+                            search={a.search as never}
+                            onClick={() => setOpen(false)}
+                            className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-2 py-3.5 text-center shadow-[var(--shadow-card)] transition-[transform,background-color] duration-[160ms] active:scale-[0.97] active:bg-muted"
+                            style={{ transitionTimingFunction: "cubic-bezier(0.23, 1, 0.32, 1)" }}
+                          >
+                            <span className="flex size-10 items-center justify-center rounded-xl bg-primary-soft text-primary">
+                              <a.icon className="size-5" />
+                            </span>
+                            <span className="text-[13px] font-semibold leading-tight">{a.label}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
               </DrawerContent>
@@ -212,10 +242,35 @@ export function AppShell({
           </li>
 
           {tabs.slice(2).map((t) => (
-            <NavTab key={t.to} {...t} active={pathname === t.to} />
+            <NavTab key={t.to} to={t.to} label={t.label} icon={t.icon} active={(t.match as readonly string[]).includes(pathname)} />
           ))}
         </ul>
       </nav>
+    </div>
+  );
+}
+
+/** Calendar ⇄ tasks switch, shown in place of the title on the "יומן" tab. */
+function PlannerSwitch({ pathname }: { pathname: string }) {
+  return (
+    <div className="flex rounded-2xl bg-muted p-1" role="tablist" aria-label="יומן">
+      {PLANNER.map((p) => {
+        const active = pathname === p.to;
+        return (
+          <Link
+            key={p.to}
+            to={p.to}
+            role="tab"
+            aria-selected={active}
+            className={cn(
+              "rounded-xl px-4 py-1.5 text-sm font-bold transition-[background-color,color] duration-150",
+              active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover-fine:hover:text-foreground",
+            )}
+          >
+            {p.label}
+          </Link>
+        );
+      })}
     </div>
   );
 }

@@ -181,6 +181,15 @@ function AuthGuard({ children }: { children: ReactNode }) {
       supabase.auth.getSession().then(({ data }) => {
         setAuthed(!!data.session);
         setChecking(false);
+        // Someone has an account on this device: /login opens on "כניסה"
+        // for them next time instead of sign-up (KNOWN_DEVICE_KEY in login.tsx).
+        if (data.session) {
+          try {
+            localStorage.setItem("nahel-hakol:has-account", "1");
+          } catch {
+            /* storage blocked */
+          }
+        }
         if (!data.session && !isPublicPage) {
           navigate({ to: "/login", search: { redirect: intended } });
         }
