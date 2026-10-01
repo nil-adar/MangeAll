@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { CalendarDays, Home, Plus, Wallet, Camera, CalendarPlus, ListPlus, Receipt, ShoppingCart, Cake, Repeat, LogOut, ChevronRight, User, Briefcase } from "lucide-react";
+import { CalendarDays, Home, Plus, Wallet, CalendarPlus, ListPlus, Receipt, ShoppingCart, Cake, PartyPopper, Repeat, LogOut, ChevronRight, User, Briefcase } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { ScopeSwitch } from "@/lib/scope";
@@ -44,6 +44,7 @@ const quickGroups = [
       { label: "משימה", icon: ListPlus, to: "/event/new", search: { type: "task" } },
       { label: "אירוע", icon: CalendarPlus, to: "/event/new", search: { type: "event" } },
       { label: "יום הולדת", icon: Cake, to: "/event/new", search: { type: "birthday" } },
+      { label: "שמחה", icon: PartyPopper, to: "/event/new", search: { type: "occasion" } },
     ],
   },
   {
@@ -51,7 +52,8 @@ const quickGroups = [
     items: [
       { label: "הוצאה מזדמנת", icon: Receipt, to: "/expense/new", search: { mode: "once" } },
       { label: "הוצאה קבועה", icon: Repeat, to: "/expense/new", search: { mode: "fixed" } },
-      { label: "סריקת קבלה", icon: Camera, to: "/expense/new", search: { mode: "scan" } },
+      // Receipt scanning (mode "scan") is still a "בקרוב" placeholder — it comes
+      // back here once it works, not before: a dead end in the main menu costs trust.
     ],
   },
   {
@@ -73,6 +75,7 @@ const quickGroups = [
  */
 const PARENT: Record<string, string> = {
   "/birthdays": "/calendar",
+  "/occasions": "/calendar",
   "/event/new": "/calendar",
   "/expense/new": "/finance",
   "/profile": "/",
@@ -263,7 +266,7 @@ function PlannerSwitch({ pathname }: { pathname: string }) {
             role="tab"
             aria-selected={active}
             className={cn(
-              "rounded-xl px-4 py-1.5 text-sm font-bold transition-[background-color,color] duration-150",
+              "whitespace-nowrap rounded-xl px-3 py-1.5 text-sm font-bold transition-[background-color,color] duration-150",
               active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover-fine:hover:text-foreground",
             )}
           >

@@ -2,7 +2,8 @@
 -- nahel-hakol — demo account data (for screenshots and showing the app)
 --
 -- Fills ONE demo account with realistic sample data in every area of the app:
--- tasks, events, birthdays, expenses + budget, shopping list, work days.
+-- tasks, events, birthdays, occasions, expenses + budget, shopping list, work days.
+-- Run occasions-migration.sql first (the occasions need its columns).
 -- All dates are relative to today, so the demo always looks current —
 -- re-run it any time to refresh.
 --
@@ -69,6 +70,21 @@ BEGIN
     (15, 'כנס מוצר',                  '09:00',   '17:00', 'אקספו תל אביב',          'work',   false),
     (25, 'יום הולדת לסבתא רחל',       'כל היום', NULL,    NULL,                     'family', true)
   ) AS t(n, title, tm, te, loc, cat, bday);
+
+  -- ─── 2b. Occasions (שמחות) — needs occasions-migration.sql ────────────────
+  -- One upcoming wedding, an anniversary (9th — the wedding year is 9 back),
+  -- and a brit that's already happened, so /occasions shows its "עברו" group.
+  INSERT INTO public.events (user_id, title, day, month, year, occasion, time, end_time, location, category, is_birthday, gift)
+  SELECT uid, t.title,
+         extract(day   FROM d + t.n)::int,
+         extract(month FROM d + t.n)::int,
+         extract(year  FROM d + t.n)::int - t.years_back,
+         t.occ, t.tm, NULL, t.loc, 'family', false, t.gift
+  FROM (VALUES
+    (18,  'wedding',     'החתונה של שירה ועומר',       0, '19:30',   'גני התערוכה, תל אביב', 800.00),
+    (45,  'anniversary', 'יום הנישואין של נועה ואורי', 9, 'כל היום', NULL,                   NULL),
+    (-12, 'brit',        'הברית של הבן של מיכל ורון',  0, '09:00',   'בית הכנסת הגדול',      300.00)
+  ) AS t(n, occ, title, years_back, tm, loc, gift);
 
   -- ─── 3. Tasks (age_days = how long ago it was created) ────────────────────
   INSERT INTO public.tasks (user_id, title, due, priority, category, done, today, created_at)

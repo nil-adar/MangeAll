@@ -14,6 +14,7 @@ import { Route as BirthdaysRouteImport } from './routes/birthdays'
 import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as FinanceRouteImport } from './routes/finance'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as OccasionsRouteImport } from './routes/occasions'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ShoppingRouteImport } from './routes/shopping'
@@ -45,6 +46,11 @@ const FinanceRoute = FinanceRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OccasionsRoute = OccasionsRouteImport.update({
+  id: '/occasions',
+  path: '/occasions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfileRoute = ProfileRouteImport.update({
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/calendar': typeof CalendarRoute
   '/finance': typeof FinanceRoute
   '/login': typeof LoginRoute
+  '/occasions': typeof OccasionsRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shopping': typeof ShoppingRoute
@@ -103,6 +110,7 @@ export interface FileRoutesByTo {
   '/calendar': typeof CalendarRoute
   '/finance': typeof FinanceRoute
   '/login': typeof LoginRoute
+  '/occasions': typeof OccasionsRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shopping': typeof ShoppingRoute
@@ -118,6 +126,7 @@ export interface FileRoutesById {
   '/calendar': typeof CalendarRoute
   '/finance': typeof FinanceRoute
   '/login': typeof LoginRoute
+  '/occasions': typeof OccasionsRoute
   '/profile': typeof ProfileRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shopping': typeof ShoppingRoute
@@ -134,6 +143,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/finance'
     | '/login'
+    | '/occasions'
     | '/profile'
     | '/reset-password'
     | '/shopping'
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/finance'
     | '/login'
+    | '/occasions'
     | '/profile'
     | '/reset-password'
     | '/shopping'
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/calendar'
     | '/finance'
     | '/login'
+    | '/occasions'
     | '/profile'
     | '/reset-password'
     | '/shopping'
@@ -177,6 +189,7 @@ export interface RootRouteChildren {
   CalendarRoute: typeof CalendarRoute
   FinanceRoute: typeof FinanceRoute
   LoginRoute: typeof LoginRoute
+  OccasionsRoute: typeof OccasionsRoute
   ProfileRoute: typeof ProfileRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ShoppingRoute: typeof ShoppingRoute
@@ -221,6 +234,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/occasions': {
+      id: '/occasions'
+      path: '/occasions'
+      fullPath: '/occasions'
+      preLoaderRoute: typeof OccasionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profile': {
@@ -281,6 +301,7 @@ const rootRouteChildren: RootRouteChildren = {
   CalendarRoute: CalendarRoute,
   FinanceRoute: FinanceRoute,
   LoginRoute: LoginRoute,
+  OccasionsRoute: OccasionsRoute,
   ProfileRoute: ProfileRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ShoppingRoute: ShoppingRoute,

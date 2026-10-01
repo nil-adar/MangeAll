@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Carrot, Croissant, Milk, Beef, Wheat, CupSoda, Snowflake, SprayCan, ShoppingBasket,
   ShoppingCart, Plus, Minus, X, Check, Repeat2, ChevronDown, PartyPopper,
@@ -31,8 +31,13 @@ import {
   normalize, recordPurchase, getStaples, STARTER_STAPLES, suggest,
 } from "@/lib/shopping-smart";
 import { cn } from "@/lib/utils";
+import { Tip } from "@/components/Tip";
 
 export const Route = createFileRoute("/shopping")({
+  // ?share=1 opens the share sheet on arrival — the home page's
+  // "הזמנת בן/בת הזוג" first step links here.
+  validateSearch: (search: Record<string, unknown>): { share?: 1 } =>
+    search["share"] === 1 || search["share"] === "1" ? { share: 1 } : {},
   component: ShoppingPage,
 });
 
@@ -755,7 +760,13 @@ function ShoppingPage() {
   const clearChecked = useClearCheckedShoppingItems();
   const [shopping, setShopping] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+  const { share } = Route.useSearch();
+  const navigate = useNavigate();
+  const [shareOpen, setShareOpen] = useState(share === 1);
+  // Drop the flag once it's done its job, so a refresh or Back doesn't reopen it
+  useEffect(() => {
+    if (share === 1) navigate({ to: "/shopping", search: {}, replace: true });
+  }, [share, navigate]);
   const { data: household } = useHousehold();
   // Live sync only matters once the list is actually shared
   useShoppingRealtime(!!household); // also fires while a request is pending
@@ -803,6 +814,11 @@ function ShoppingPage() {
         <div className="space-y-4 pb-28">
           {!shopping && <QuickAdd items={items} />}
           {!shopping && <ShareBar onOpen={() => setShareOpen(true)} />}
+          {shopping && (
+            <Tip id="shopping-mode" title="מצב קנייה">
+              נגיעה בפריט מעבירה אותו לעגלה, והמסך יישאר דולק עד שתלחצו ״סיום״.
+            </Tip>
+          )}
 
           {/* Progress — transform only, grows from the right (RTL) */}
           {total > 0 && (
@@ -848,8 +864,11 @@ function ShoppingPage() {
               <span className="mb-4 flex size-16 items-center justify-center rounded-3xl bg-primary/8 text-primary">
                 <ShoppingCart className="size-7" />
               </span>
-              <p className="text-base font-bold">הרשימה ריקה</p>
-              <p className="mt-1 text-sm text-muted-foreground">הקלד למעלה, או בחר מההצעות</p>
+              {/* What the list does, not just that it's empty */}
+              <p className="text-base font-bold">רשימה אחת לכל הבית</p>
+              <p className="mt-1 max-w-[270px] text-sm text-muted-foreground">
+                כותבים ״3 חלב״ או ״חצי ק״ג עגבניות״, והכול מסתדר לפי המחלקות בסופר. שתפו כדי שכל הבית יראה אותה רשימה.
+              </p>
             </div>
           )}
 

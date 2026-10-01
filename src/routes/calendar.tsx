@@ -1,8 +1,11 @@
 import { useState, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CalendarPlus, Clock, MapPin, Cake, ChevronRight, ChevronLeft, Trash2 } from "lucide-react";
+import { CalendarPlus, Clock, MapPin, ChevronRight, ChevronLeft, Trash2 } from "lucide-react";
+import { EventTypeIcon } from "@/components/OccasionList";
+import { EditEventButton } from "@/components/EditEventButton";
+import { Tip } from "@/components/Tip";
 import { AppShell } from "@/components/AppShell";
-import { useEvents, useDeleteEvent, getCat, occursOn } from "@/lib/queries";
+import { useEvents, useDeleteEvent, getCat, occursOn, inMonth } from "@/lib/queries";
 import { useScope, inScope } from "@/lib/scope";
 import { cn } from "@/lib/utils";
 import type { CalEvent } from "@/lib/queries";
@@ -70,13 +73,11 @@ function CalendarPage() {
   const displayMonthNum = displayMonth + 1;
 
   // Everything that belongs to the month currently on screen
-  const monthEvents = scopedEvents.filter(
-    (e) => e.month == null || e.month === displayMonthNum
-  );
+  const monthEvents = scopedEvents.filter((e) => inMonth(e, displayMonthNum, displayYear));
 
   const selectedDayEvents = selectedDay !== null
     ? scopedEvents
-        .filter((e) => occursOn(e, selectedDay, displayMonthNum))
+        .filter((e) => occursOn(e, selectedDay, displayMonthNum, displayYear))
         .sort((a, b) => a.time.localeCompare(b.time))
     : [];
 
@@ -85,7 +86,7 @@ function CalendarPage() {
     : [];
 
   const dayHasEvent = (d: number) =>
-    scopedEvents.some((e) => occursOn(e, d, displayMonthNum));
+    scopedEvents.some((e) => occursOn(e, d, displayMonthNum, displayYear));
   const dayHasHoliday = (d: number) => monthHolidays.some((h) => h.day === d);
 
   const isCurrentMonth = monthOffset === 0;
@@ -252,6 +253,13 @@ function CalendarPage() {
         </div>
       ) : (
         <>
+          {/* Editing is new and invisible until you tap — say so once, where events are */}
+          {monthEvents.length > 0 && (
+            <Tip id="edit-event" title="אפשר לערוך כל אירוע" className="mb-4">
+              לחיצה על אירוע, או על העיפרון שלידו, פותחת אותו לשינוי שעה, מקום או תאריך.
+            </Tip>
+          )}
+
           {/* Selected day events */}
           {selectedDay !== null && (
             <div className="pb-24">
@@ -339,9 +347,21 @@ function CalendarPage() {
           {selectedDay === null && (
             <div className="pb-24">
               {monthEvents.length === 0 ? (
-                <div className="py-10 text-center text-muted-foreground">
-                  <CalendarPlus className="size-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">אין אירועים בחודש זה</p>
+                <div className="py-10 flex flex-col items-center gap-3 text-center text-muted-foreground">
+                  <CalendarPlus className="size-8 opacity-30" />
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">אין אירועים בחודש זה</p>
+                    <p className="mt-0.5 text-xs">פגישות, תורים ושמחות, עם שעה ומקום. ימי הולדת חוזרים לבד כל שנה.</p>
+                  </div>
+                  <Link
+                    to="/event/new"
+                    search={{ type: "event" }}
+                    className="flex items-center gap-2 rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-[transform] duration-[160ms] active:scale-[0.96]"
+                    style={{ transitionTimingFunction: ease }}
+                  >
+                    <CalendarPlus className="size-4" />
+                    הוסף אירוע
+                  </Link>
                 </div>
               ) : (
                 <div className="space-y-5">
@@ -351,7 +371,7 @@ function CalendarPage() {
                     <div key={day}>
                       <p className="eyebrow mb-2">{dayLabel(day)}</p>
                       <ol className="space-y-2 border-r border-border/70 pr-4 stagger-list">
-                        {monthEvents.filter((e) => occursOn(e, day, displayMonthNum)).map((e) => {
+                        {monthEvents.filter((e) => occursOn(e, day, displayMonthNum, displayYear)).map((e) => {
                           const cat = getCat(e.category);
                           return (
                             <li
@@ -373,15 +393,6 @@ function CalendarPage() {
         </>
       )}
 
-      <Link
-        to="/event/new"
-        search={{ type: "event", day: undefined }}
-        className="fixed bottom-24 left-5 z-20 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-[transform] duration-[160ms] active:scale-[0.92]"
-        style={{ transitionTimingFunction: ease }}
-        aria-label="אירוע חדש"
-      >
-        <CalendarPlus className="size-5" />
-      </Link>
     </AppShell>
   );
 }
@@ -401,9 +412,10 @@ function EventCard({ e, cat }: { e: CalEvent; cat: ReturnType<typeof getCat> }) 
 
   return (
     <div className="flex items-start gap-3">
-      <div className="flex-1 min-w-0">
+      {/* The whole text opens the edit form, not just the pencil */}
+      <Link to="/event/new" search={{ type: "event", edit: e.id }} className="flex-1 min-w-0">
         <p className="text-sm font-bold flex items-center gap-1.5">
-          {e.is_birthday && <Cake className="size-3.5 text-primary shrink-0" />}
+          <EventTypeIcon e={e} className="size-3.5 text-primary shrink-0" />
           {e.title}
         </p>
         <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -420,10 +432,11 @@ function EventCard({ e, cat }: { e: CalEvent; cat: ReturnType<typeof getCat> }) 
             </span>
           )}
         </div>
-      </div>
+      </Link>
       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${cat.soft}`}>
         {cat.label}
       </span>
+      <EditEventButton id={e.id} title={e.title} />
       <button
         onClick={handleDelete}
         disabled={deleteEvent.isPending}

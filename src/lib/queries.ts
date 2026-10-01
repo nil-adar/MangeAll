@@ -45,8 +45,39 @@ export type CalEvent = {
   location: string | null;
   category: string;
   is_birthday: boolean;
+  // The three below are optional: they don't exist on databases that haven't
+  // run occasions-migration.sql, so select("*") leaves them undefined.
+  /** Life-event type (OccasionType in occasions.ts); null for regular events. */
+  occasion?: string | null;
+  /** Year it happens — one-time occasions only show in it; for an anniversary
+   *  it's the wedding year, used for "שנה X". */
+  year?: number | null;
+  /** Gift amount in ₪. */
+  gift?: number | null;
   created_at: string;
 };
+
+/**
+ * Happens once, in `e.year`, rather than every year? Only rows with a year can
+ * be — everything else (birthdays, regular events, occasions saved before the
+ * year column existed) keeps repeating yearly. Anniversaries repeat by nature.
+ */
+export function isOneTime(e: CalEvent): boolean {
+  return e.year != null && e.occasion !== "anniversary";
+}
+
+/** Is `year` one this event happens in? Once: only its own. Yearly with a
+ *  start year (an anniversary): from then on. Otherwise every year. */
+function inYear(e: CalEvent, year: number): boolean {
+  if (e.year == null) return true;
+  return isOneTime(e) ? e.year === year : year >= e.year;
+}
+
+/** Does this event belong to the given month (1-12) of the given year? */
+export function inMonth(e: CalEvent, month: number, year: number): boolean {
+  if (!inYear(e, year)) return false;
+  return e.month == null || e.month === month;
+}
 
 /**
  * Does this event fall on the given calendar date? `month` is 1-12.
@@ -54,12 +85,14 @@ export type CalEvent = {
  * Events store day + month but no year, so a birthday recurs every year on the
  * same day/month for free. Filtering on `day` alone — which every caller used
  * to do — makes a 21 January birthday show up on the 21st of every month.
+ * One-time occasions (a wedding) carry a year too and only match in it.
  *
  * Rows written before `month` was populated have month === null; those keep
  * their old "matches any month" behaviour so existing data doesn't vanish.
  */
-export function occursOn(e: CalEvent, day: number, month: number): boolean {
+export function occursOn(e: CalEvent, day: number, month: number, year: number): boolean {
   if (e.day !== day) return false;
+  if (!inYear(e, year)) return false;
 
   if (e.month == null) {
     // A birthday with no month has no real date — showing it on the Nth of
@@ -154,25 +187,64 @@ export function useEvents() {
 
 // ── Add Event ────────────────────────────────────────────────────────────────
 
+/** Columns an older database may not have yet; the insert can do without them. */
+const OPTIONAL_EVENT_COLUMNS = ["month", "occasion", "year", "gift"] as const;
+
+/**
+ * Insert or update an events row. If the events table is missing one of the
+ * optional columns, PostgREST rejects the whole write and the change is lost.
+ * Retry without it so the save still succeeds; database-migration.sql (month)
+ * and occasions-migration.sql (occasion/year/gift) add them for real. One
+ * column per round, since the error names only the first one it hits.
+ */
+async function writeEvent(
+  row: Record<string, unknown>,
+  write: (row: Record<string, unknown>) => PromiseLike<{ error: { message: string } | null }>,
+) {
+  for (;;) {
+    const { error } = await write(row);
+    if (!error) return;
+    const missing = OPTIONAL_EVENT_COLUMNS.find(
+      (c) => c in row && new RegExp(`\\b${c}\\b`, "i").test(error.message ?? ""),
+    );
+    if (!missing) throw error;
+    const { [missing]: _drop, ...rest } = row;
+    row = rest;
+  }
+}
+
 export function useAddEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (event: Omit<CalEvent, "id" | "created_at" | "month"> & { month?: number | null }) => {
       const user_id = await requireUserId();
-      const { error } = await supabase.from("events").insert({ ...event, user_id });
-      if (!error) return;
+      await writeEvent({ ...event, user_id }, (row) => supabase.from("events").insert(row as never));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["events"] }),
+  });
+}
 
-      // If the events table has no `month` column yet, PostgREST rejects the
-      // whole insert and the record is lost. Retry without it so the save still
-      // succeeds; running supabase-checklist.sql adds the column for real.
-      const missingMonth = /month/i.test(error.message ?? "");
-      if (missingMonth && "month" in event) {
-        const { month: _drop, ...rest } = event;
-        const retry = await supabase.from("events").insert({ ...rest, user_id });
-        if (retry.error) throw retry.error;
-        return;
-      }
-      throw error;
+// ── Update Event ─────────────────────────────────────────────────────────────
+
+export type EventPatch = { id: string } & Partial<Omit<CalEvent, "id" | "created_at">>;
+
+export function useUpdateEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: EventPatch) => {
+      await writeEvent(patch, (row) => supabase.from("events").update(row as never).eq("id", id));
+    },
+    // Optimistic, so the list the edit was opened from shows it straight away
+    onMutate: async ({ id, ...patch }) => {
+      await qc.cancelQueries({ queryKey: ["events"] });
+      const prev = qc.getQueryData<CalEvent[]>(["events"]);
+      qc.setQueryData<CalEvent[]>(["events"], (old) =>
+        old?.map((e) => (e.id === id ? { ...e, ...patch } : e)) ?? []
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["events"], ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["events"] }),
   });

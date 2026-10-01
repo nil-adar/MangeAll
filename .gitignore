@@ -17,6 +17,7 @@ Claude outputs/
 
 # Nested repo (has its own .git)
 remotion-video/
+agency-agents/
 
 # Logs & OS files
 *.log

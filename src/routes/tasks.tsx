@@ -395,15 +395,6 @@ function TasksPage() {
           </div>
         )}
 
-        {/* FAB */}
-        <button
-          onClick={() => setShowAdd(true)}
-          className="fixed bottom-24 left-5 z-20 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[0_8px_24px_-10px_oklch(0_0_0/30%)] transition-[transform,box-shadow] duration-[160ms] active:scale-[0.92]"
-          style={{ transitionTimingFunction: ease }}
-          aria-label="משימה חדשה"
-        >
-          <Plus className="size-5" />
-        </button>
       </AppShell>
 
       {showAdd && <AddTaskModal onClose={() => setShowAdd(false)} />}
@@ -513,19 +504,52 @@ function TaskCard({
 
 // ── Empty State ────────────────────────────────────────────────────────────────
 
+/** One tap adds them as real tasks for this week — a first entry with no typing. */
+const EXAMPLE_TASKS = [
+  { title: "לחדש ביטוח רכב", category: "money" },
+  { title: "לתאם טכנאי למזגן", category: "family" },
+  { title: "אסיפת הורים", category: "family" },
+] as const;
+
 function EmptyState({ onAdd }: { onAdd: () => void }) {
+  const addTask = useAddTask();
+
   return (
     <div
-      className="flex flex-col items-center justify-center py-24 text-center"
+      className="flex flex-col items-center justify-center py-20 text-center"
       style={{ animation: `fade-up 400ms ${ease} both` }}
     >
       <div className="mb-5 flex size-16 items-center justify-center rounded-2xl border border-primary/15 bg-primary/8">
         <ClipboardList className="size-7 text-primary opacity-60" />
       </div>
-      <p className="mb-1.5 text-base font-bold text-foreground">אין עדיין משימות</p>
-      <p className="mb-7 max-w-[200px] text-sm leading-relaxed text-muted-foreground">
-        הוסף משימה ראשונה ותתחיל לנהל את היום שלך
+      {/* What this screen is for, before what to do on it */}
+      <p className="mb-1.5 text-base font-bold text-foreground">כל מה שצריך לזכור לעשות</p>
+      <p className="mb-4 max-w-[240px] text-sm leading-relaxed text-muted-foreground">
+        עם תאריך יעד, ותזכורת כשמשהו מתעכב. נסו אחת מאלה:
       </p>
+      <div className="mb-7 flex max-w-[300px] flex-wrap justify-center gap-2">
+        {EXAMPLE_TASKS.map((t) => (
+          <button
+            key={t.title}
+            type="button"
+            disabled={addTask.isPending}
+            onClick={() =>
+              addTask.mutate({
+                title: t.title,
+                due: "השבוע",
+                priority: "רגילה",
+                category: t.category,
+                done: false,
+                today: false,
+              })
+            }
+            className="rounded-full bg-muted px-3.5 py-1.5 text-xs font-semibold text-foreground transition-[transform,background-color] duration-[160ms] hover:bg-primary/12 active:scale-[0.95] disabled:opacity-50"
+            style={{ transitionTimingFunction: ease }}
+          >
+            + {t.title}
+          </button>
+        ))}
+      </div>
       <button
         onClick={onAdd}
         className="rounded-2xl bg-primary px-6 py-3 text-sm font-bold text-primary-foreground transition-transform duration-[160ms] active:scale-[0.97]"

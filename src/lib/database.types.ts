@@ -32,13 +32,25 @@ export type Database = {
           location: string | null;
           category: string;
           is_birthday: boolean;
+          /** Life-event type (see src/lib/occasions.ts); null for regular events. */
+          occasion: string | null;
+          /** Year it happens; only set on occasions. */
+          year: number | null;
+          /** Gift amount in ₪, occasions only. */
+          gift: number | null;
           created_at: string;
         };
-        // month optional: the insert retries without it on older databases
+        // month/occasion/year/gift optional: the insert retries without them on
+        // older databases (occasions-migration.sql adds the last three)
         Insert: Omit<
           Database["public"]["Tables"]["events"]["Row"],
-          "id" | "created_at" | "month"
-        > & { month?: number | null };
+          "id" | "created_at" | "month" | "occasion" | "year" | "gift"
+        > & {
+          month?: number | null;
+          occasion?: string | null;
+          year?: number | null;
+          gift?: number | null;
+        };
         Update: Partial<Database["public"]["Tables"]["events"]["Insert"]>;
         Relationships: [];
       };

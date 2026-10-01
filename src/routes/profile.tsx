@@ -2,9 +2,11 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useState, useRef, useEffect } from "react";
 import {
   Camera, Check, Pencil, X, LogOut, Mail, Wallet, User, Trash2,
-  KeyRound, Cake, ShoppingCart, ListChecks, CalendarDays, AlertTriangle,
+  KeyRound, Lightbulb, Cake, PartyPopper, ShoppingCart, ListChecks, CalendarDays, AlertTriangle,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { useOccasions } from "@/components/OccasionList";
+import { resetTips } from "@/components/Tip";
 import { supabase } from "@/lib/supabase";
 import {
   useProfile,
@@ -84,6 +86,8 @@ function ProfilePage() {
   const birthdayCount = events.filter((e) => e.is_birthday).length;
   const eventCount = events.filter((e) => !e.is_birthday).length;
   const shoppingOpen = shopping.filter((i) => !i.checked).length;
+  const { occasions } = useOccasions();
+  const [tipsReset, setTipsReset] = useState(false);
 
   function startEditName() {
     setNameDraft(displayName);
@@ -368,11 +372,12 @@ function ProfilePage() {
           </p>
         </section>
 
-        {/* ── Quick links ── surfaces the two buried pages ── */}
+        {/* ── Quick links ── surfaces the pages with no tab of their own ── */}
         <section className="surface-card rounded-3xl p-5">
           <p className="eyebrow mb-3">קיצורי דרך</p>
           <div className="space-y-2">
             <QuickLink to="/birthdays" icon={Cake} label="ימי הולדת" count={birthdayCount} />
+            <QuickLink to="/occasions" icon={PartyPopper} label="שמחות" count={occasions.length} />
             <QuickLink to="/shopping" icon={ShoppingCart} label="רשימת קניות" count={shoppingOpen} />
           </div>
         </section>
@@ -401,6 +406,20 @@ function ProfilePage() {
           {pwError && (
             <p className="mt-2 text-center text-xs font-semibold text-destructive">{pwError}</p>
           )}
+
+          {/* The one-time tips (components/Tip.tsx), for anyone who closed one too fast */}
+          <button
+            onClick={() => {
+              resetTips();
+              setTipsReset(true);
+            }}
+            disabled={tipsReset}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-muted py-3 text-sm font-bold transition-colors duration-150 disabled:opacity-60 hover-fine:hover:bg-border/60"
+            style={{ transitionTimingFunction: "var(--ease-out)" }}
+          >
+            <Lightbulb className="size-4" />
+            {tipsReset ? "הטיפים יופיעו שוב" : "הצגת הטיפים מחדש"}
+          </button>
 
           <button
             onClick={handleLogout}

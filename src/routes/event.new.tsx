@@ -1,14 +1,36 @@
 import { useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
-import { useAddEvent, useAddTask } from "@/lib/queries";
+import {
+  useAddEvent,
+  useAddExpense,
+  useAddTask,
+  useEvents,
+  useUpdateEvent,
+  type CalEvent,
+} from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import { BirthdayList, useBirthdays } from "@/components/BirthdayList";
+import { BirthdayList, extractName, useBirthdays } from "@/components/BirthdayList";
+import {
+  OCCASIONS,
+  OCCASION_ORDER,
+  detectOccasion,
+  isOccasionType,
+  joinNames,
+  occasionTitle,
+  splitOccasionTitle,
+  type OccasionType,
+} from "@/lib/occasions";
 
 export const Route = createFileRoute("/event/new")({
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { type: string; day?: number | undefined; edit?: string } => ({
     type: (search["type"] as string) ?? "event",
     day: search["day"] ? Number(search["day"]) : undefined,
+    // The id of an existing event: the same forms open filled in, and saving
+    // updates it instead of adding a new one.
+    ...(typeof search["edit"] === "string" ? { edit: search["edit"] } : {}),
   }),
   component: NewEventPage,
 });
@@ -55,16 +77,40 @@ function hebrewDate(dateStr: string): string {
   return d.toLocaleDateString("he-IL", { day: "numeric", month: "long" });
 }
 
+/**
+ * A saved event's date as "YYYY-MM-DD", for a date input. Most events have no
+ * year (they repeat yearly), so those show in the current year; rows from
+ * before the month column show in the current month.
+ */
+function eventDateISO(e: CalEvent): string {
+  const y = e.year ?? today.getFullYear();
+  const m = e.month ?? today.getMonth() + 1;
+  return `${y}-${String(m).padStart(2, "0")}-${String(e.day).padStart(2, "0")}`;
+}
+
+/** After saving an edit: back to the screen it was opened from. */
+function useLeaveEdit(fallback: "/calendar" | "/birthdays" | "/occasions") {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const canGoBack = useCanGoBack();
+  return () => (canGoBack ? router.history.back() : navigate({ to: fallback }));
+}
+
 // ── Birthday Form ─────────────────────────────────────────────────────────────
 
-function BirthdayForm() {
+function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
   const addEvent = useAddEvent();
-  const [name, setName] = useState("");
-  const [selectedMonth, setSelectedMonth] = useState(today.getMonth()); // 0-based
-  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const updateEvent = useUpdateEvent();
+  const leaveEdit = useLeaveEdit("/birthdays");
+  const [name, setName] = useState(editing ? extractName(editing.title) : "");
+  const [selectedMonth, setSelectedMonth] = useState(
+    editing?.month ? editing.month - 1 : today.getMonth()
+  ); // 0-based
+  const [selectedDay, setSelectedDay] = useState<number | null>(editing?.day ?? null);
   const [error, setError] = useState("");
   const [savedName, setSavedName] = useState<string | null>(null);
   const { birthdays } = useBirthdays();
+  const busy = addEvent.isPending || updateEvent.isPending;
 
   // Leap-year reference (2024) on purpose: a 29 Feb birthday must stay
   // selectable in every year, not just leap years.
@@ -80,6 +126,22 @@ function BirthdayForm() {
     if (!name.trim()) { setError("נא להזין שם"); return; }
     if (!selectedDay) { setError("נא לבחור יום"); return; }
     setError("");
+
+    if (editing) {
+      try {
+        await updateEvent.mutateAsync({
+          id: editing.id,
+          title: `יום הולדת ל${name.trim()}`,
+          day: selectedDay,
+          month: selectedMonth + 1,
+          is_birthday: true,
+        });
+        leaveEdit();
+      } catch (err) {
+        setError(`השמירה נכשלה: ${(err as Error).message ?? "נסה שוב"}`);
+      }
+      return;
+    }
 
     try {
       await addEvent.mutateAsync({
@@ -224,11 +286,11 @@ function BirthdayForm() {
 
       <button
         type="submit"
-        disabled={addEvent.isPending || !name.trim() || !selectedDay}
+        disabled={busy || !name.trim() || !selectedDay}
         className="w-full rounded-2xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition-[transform,opacity] active:scale-[0.97] disabled:opacity-40"
         style={{ transitionTimingFunction: ease, transitionDuration: "160ms" }}
       >
-        {addEvent.isPending ? "שומר..." : "הוסף יום הולדת 🎂"}
+        {busy ? "שומר..." : editing ? "שמור שינויים" : "הוסף יום הולדת 🎂"}
       </button>
 
       {savedName && (
@@ -238,8 +300,9 @@ function BirthdayForm() {
       )}
     </form>
 
-    {/* Saved birthdays — outside the <form> so its delete buttons can't submit it */}
-    {birthdays.length > 0 && (
+    {/* Saved birthdays — outside the <form> so its delete buttons can't submit it.
+        Not while editing: the page is about the one being changed. */}
+    {!editing && birthdays.length > 0 && (
       <div className="border-t border-border/60 pt-6">
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-base font-bold">ימי ההולדת שלך</h2>
@@ -252,24 +315,312 @@ function BirthdayForm() {
   );
 }
 
-// ── Event Form ────────────────────────────────────────────────────────────────
+// ── Occasion Form (שמחות) ──────────────────────────────────────────────────────
 
-function EventForm({ initialDay }: { initialDay?: number | undefined }) {
+/** Next time a day/month comes round, as "YYYY-MM-DD" — today counts. */
+function nextOccurrenceISO(month: number, day: number): string {
+  const mmdd = `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const y = today.getFullYear();
+  return `${y}-${mmdd}` >= todayStr ? `${y}-${mmdd}` : `${y + 1}-${mmdd}`;
+}
+
+function OccasionForm({ editing }: { editing?: CalEvent | undefined }) {
   const navigate = useNavigate();
   const addEvent = useAddEvent();
+  const updateEvent = useUpdateEvent();
+  const addExpense = useAddExpense();
+  const leaveEdit = useLeaveEdit("/occasions");
 
-  const defaultDate = initialDay
-    ? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(initialDay).padStart(2, "0")}`
-    : todayStr;
+  const initialType: OccasionType = isOccasionType(editing?.occasion) ? editing.occasion : "wedding";
+  const [initialName1, initialName2] = editing ? splitOccasionTitle(initialType, editing.title) : ["", ""];
 
-  const [title, setTitle] = useState("");
-  const [date, setDate] = useState(defaultDate);
-  const [allDay, setAllDay] = useState(false);
-  const [time, setTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("");
-  const [location, setLocation] = useState("");
-  const [category, setCategory] = useState<string>("work");
+  const [type, setType] = useState<OccasionType>(initialType);
+  const [name1, setName1] = useState(initialName1);
+  const [name2, setName2] = useState(initialName2);
+  const [date, setDate] = useState(editing ? eventDateISO(editing) : "");
+  const [time, setTime] = useState(editing && editing.time !== "כל היום" ? editing.time : "");
+  const [location, setLocation] = useState(editing?.location ?? "");
+  const [gift, setGift] = useState(editing?.gift != null ? String(editing.gift) : "");
+  const [logExpense, setLogExpense] = useState(true);
   const [error, setError] = useState("");
+
+  const meta = OCCASIONS[type];
+  const isAnniversary = type === "anniversary";
+  const names = meta.couple ? joinNames(name1, name2) : name1.trim();
+  const title = occasionTitle(type, names);
+  const giftAmount = Number(gift);
+  const hasGift = gift.trim() !== "" && Number.isFinite(giftAmount) && giftAmount > 0;
+  const busy = addEvent.isPending || updateEvent.isPending || addExpense.isPending;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!names) { setError("נא להזין שם"); return; }
+    if (!date) { setError("נא לבחור תאריך"); return; }
+    if (gift.trim() !== "" && !hasGift) { setError("סכום המתנה לא תקין"); return; }
+    setError("");
+
+    const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+
+    // Editing changes the occasion only. Any expense logged when it was added
+    // stays as it is in Finance — logging again here would count the gift twice.
+    if (editing) {
+      try {
+        await updateEvent.mutateAsync({
+          id: editing.id,
+          title,
+          day: d,
+          month: m,
+          year: y,
+          occasion: type,
+          time: time || "כל היום",
+          location: location.trim() || null,
+          gift: hasGift ? giftAmount : null,
+        });
+        leaveEdit();
+      } catch (err) {
+        setError(`השמירה נכשלה: ${(err as Error).message ?? "נסה שוב"}`);
+      }
+      return;
+    }
+
+    try {
+      await addEvent.mutateAsync({
+        title,
+        day: d,
+        month: m,
+        // One-time occasions only show in this year; for an anniversary it's
+        // the wedding year, which is what "שנה X" counts from.
+        year: y,
+        occasion: type,
+        time: time || "כל היום",
+        end_time: null,
+        location: location.trim() || null,
+        category: "family",
+        is_birthday: false,
+        gift: hasGift ? giftAmount : null,
+      });
+    } catch (err) {
+      setError(`השמירה נכשלה: ${(err as Error).message ?? "נסה שוב"}`);
+      return;
+    }
+
+    if (hasGift && logExpense) {
+      try {
+        await addExpense.mutateAsync({
+          vendor: `מתנה – ${title}`,
+          amount: giftAmount,
+          category: "family",
+          // Spent on the day itself. An anniversary's stored date is the
+          // wedding, years back, so use the coming one instead.
+          date: isAnniversary ? nextOccurrenceISO(m, d) : date,
+          repeat: "once",
+        });
+      } catch (err) {
+        setError(`השמחה נשמרה, אבל רישום ההוצאה נכשל: ${(err as Error).message ?? "נסה שוב"}`);
+        return;
+      }
+    }
+    navigate({ to: "/occasions" });
+  }
+
+  const inputCls =
+    "w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40";
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6 pb-28">
+      {/* Preview banner — the title is generated, not typed */}
+      <div
+        className="rounded-3xl bg-primary/8 border border-primary/20 px-5 py-4 text-center"
+        style={{ animation: `fade-up 280ms ${ease} both` }}
+      >
+        <p className="text-xl font-bold text-primary">
+          {meta.emoji} {names ? title : `${meta.prefix}...`}
+        </p>
+      </div>
+
+      {/* Type chips */}
+      <div style={{ animation: `fade-up 280ms ${ease} 40ms both` }}>
+        <p className="text-sm font-semibold mb-2.5">איזו שמחה?</p>
+        <div className="flex flex-wrap gap-2">
+          {OCCASION_ORDER.map((t) => (
+            <button
+              key={t}
+              type="button"
+              aria-pressed={type === t}
+              onClick={() => setType(t)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-semibold transition-[transform,background-color] active:scale-[0.93]",
+                type === t ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
+              )}
+              style={{ transitionTimingFunction: ease, transitionDuration: "160ms" }}
+            >
+              <span>{OCCASIONS[t].emoji}</span>
+              {OCCASIONS[t].label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Names — two fields for a couple, joined with ו */}
+      <div style={{ animation: `fade-up 280ms ${ease} 80ms both` }}>
+        <p className="text-sm font-semibold mb-1.5">של מי?</p>
+        {meta.couple ? (
+          <div className="grid grid-cols-2 gap-2.5">
+            <input
+              type="text"
+              value={name1}
+              onChange={(e) => setName1(e.target.value)}
+              placeholder={meta.placeholder}
+              aria-label="שם ראשון"
+              className={inputCls}
+            />
+            <input
+              type="text"
+              value={name2}
+              onChange={(e) => setName2(e.target.value)}
+              placeholder={isAnniversary ? "אבא" : "יוסי"}
+              aria-label="שם שני"
+              className={inputCls}
+            />
+          </div>
+        ) : (
+          <input
+            type="text"
+            value={name1}
+            onChange={(e) => setName1(e.target.value)}
+            placeholder={meta.placeholder}
+            aria-label="שם"
+            className={inputCls}
+          />
+        )}
+      </div>
+
+      {/* Full date — the year matters here, unlike birthdays */}
+      <div style={{ animation: `fade-up 280ms ${ease} 120ms both` }}>
+        <p className="text-sm font-semibold mb-1.5">{isAnniversary ? "תאריך החתונה" : "תאריך"}</p>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          aria-label={isAnniversary ? "תאריך החתונה" : "תאריך"}
+          className={inputCls}
+        />
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          {isAnniversary
+            ? "חוזר כל שנה — ונספור בשבילך איזו שנה חוגגים"
+            : "פעם אחת — לא יחזור בשנה הבאה"}
+        </p>
+      </div>
+
+      {/* Time + venue — both optional */}
+      <div className="grid grid-cols-[7.5rem_1fr] gap-2.5" style={{ animation: `fade-up 280ms ${ease} 160ms both` }}>
+        <div>
+          <p className="text-sm font-semibold mb-1.5">שעה</p>
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            aria-label="שעה"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <p className="text-sm font-semibold mb-1.5">מקום</p>
+          <input
+            type="text"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="אולם, כתובת..."
+            aria-label="מקום"
+            className={inputCls}
+          />
+        </div>
+      </div>
+
+      {/* Gift — optional, and can be logged in Finance too */}
+      <div style={{ animation: `fade-up 280ms ${ease} 200ms both` }}>
+        <p className="text-sm font-semibold mb-1.5">
+          מתנה ₪ <span className="font-normal text-muted-foreground">(לא חובה)</span>
+        </p>
+        <input
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="any"
+          value={gift}
+          onChange={(e) => setGift(e.target.value)}
+          placeholder="למשל 500"
+          aria-label="סכום המתנה"
+          className={inputCls}
+        />
+        {hasGift && !editing && (
+          <div className="mt-2.5 flex items-center justify-between rounded-2xl border border-border bg-card px-4 py-3">
+            <span className="text-sm font-semibold">לרשום גם כהוצאה בכספים</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={logExpense}
+              aria-label="לרשום גם כהוצאה בכספים"
+              onClick={() => setLogExpense((v) => !v)}
+              className={cn(
+                "relative h-6 w-11 rounded-full transition-colors",
+                logExpense ? "bg-primary" : "bg-muted"
+              )}
+            >
+              <span className={cn(
+                "absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform",
+                logExpense ? "translate-x-5" : "translate-x-0.5"
+              )} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <button
+        type="submit"
+        disabled={busy || !names || !date}
+        className="w-full rounded-2xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition-[transform,opacity] active:scale-[0.97] disabled:opacity-40"
+        style={{ transitionTimingFunction: ease, transitionDuration: "160ms" }}
+      >
+        {busy ? "שומר..." : editing ? "שמור שינויים" : `הוסף ${meta.label} ${meta.emoji}`}
+      </button>
+    </form>
+  );
+}
+
+// ── Event Form ────────────────────────────────────────────────────────────────
+
+function EventForm({
+  initialDay,
+  editing,
+}: {
+  initialDay?: number | undefined;
+  editing?: CalEvent | undefined;
+}) {
+  const navigate = useNavigate();
+  const addEvent = useAddEvent();
+  const updateEvent = useUpdateEvent();
+  const leaveEdit = useLeaveEdit("/calendar");
+
+  const defaultDate = editing
+    ? eventDateISO(editing)
+    : initialDay
+      ? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(initialDay).padStart(2, "0")}`
+      : todayStr;
+  const wasAllDay = editing?.time === "כל היום";
+
+  const [title, setTitle] = useState(editing?.title ?? "");
+  const [date, setDate] = useState(defaultDate);
+  const [allDay, setAllDay] = useState(wasAllDay);
+  const [time, setTime] = useState(editing && !wasAllDay ? editing.time : "09:00");
+  const [endTime, setEndTime] = useState(editing?.end_time ?? "");
+  const [location, setLocation] = useState(editing?.location ?? "");
+  const [category, setCategory] = useState<string>(editing?.category ?? "work");
+  const [error, setError] = useState("");
+  const detected = detectOccasion(title);
+  const busy = addEvent.isPending || updateEvent.isPending;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -278,12 +629,42 @@ function EventForm({ initialDay }: { initialDay?: number | undefined }) {
     setError("");
 
     const d = new Date(date + "T00:00:00");
+
+    if (editing) {
+      try {
+        await updateEvent.mutateAsync({
+          id: editing.id,
+          title: title.trim(),
+          day: d.getDate(),
+          month: d.getMonth() + 1,
+          // Renamed into a שמחה: tag it as on add. Renamed out of one: untag it,
+          // or it would stay on the occasions page (and stuck to one year).
+          ...(detected
+            ? { occasion: detected, year: d.getFullYear() }
+            : editing.occasion
+              ? { occasion: null, year: null }
+              : {}),
+          time: allDay ? "כל היום" : time,
+          end_time: (!allDay && endTime) ? endTime : null,
+          location: location.trim() || null,
+          category,
+        });
+        leaveEdit();
+      } catch (err) {
+        setError(`השמירה נכשלה: ${(err as Error).message ?? "נסה שוב"}`);
+      }
+      return;
+    }
+
     try {
       await addEvent.mutateAsync({
         title: title.trim(),
         day: d.getDate(),
         // Without month the event matched the same day in every month
         month: d.getMonth() + 1,
+        // "החתונה של…" typed here is still a שמחה: tag it, and keep the year so
+        // a wedding happens once instead of every year.
+        ...(detected ? { occasion: detected, year: d.getFullYear() } : {}),
         time: allDay ? "כל היום" : time,
         end_time: (!allDay && endTime) ? endTime : null,
         location: location.trim() || null,
@@ -307,8 +688,13 @@ function EventForm({ initialDay }: { initialDay?: number | undefined }) {
           onChange={(e) => setTitle(e.target.value)}
           placeholder="שם האירוע"
           className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
-          autoFocus
+          autoFocus={!editing}
         />
+        {detected && (
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {OCCASIONS[detected].emoji} יופיע גם ברשימת השמחות ({OCCASIONS[detected].label})
+          </p>
+        )}
       </div>
 
       <div>
@@ -397,10 +783,10 @@ function EventForm({ initialDay }: { initialDay?: number | undefined }) {
 
       <button
         type="submit"
-        disabled={addEvent.isPending}
+        disabled={busy}
         className="w-full rounded-2xl bg-primary py-3.5 text-sm font-bold text-primary-foreground active:scale-95 transition disabled:opacity-60"
       >
-        {addEvent.isPending ? "שומר..." : "שמור אירוע"}
+        {busy ? "שומר..." : editing ? "שמור שינויים" : "שמור אירוע"}
       </button>
     </form>
   );
@@ -536,10 +922,12 @@ function TaskForm() {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 function NewEventPage() {
-  const { type, day } = Route.useSearch();
+  const { type, day, edit } = Route.useSearch();
+  if (edit) return <EditEventPage id={edit} />;
 
   const title =
     type === "birthday" ? "הוסף יום הולדת" :
+    type === "occasion" ? "הוסף שמחה" :
     type === "task" ? "משימה חדשה" :
     "אירוע חדש";
 
@@ -549,8 +937,53 @@ function NewEventPage() {
         <TaskForm />
       ) : type === "birthday" ? (
         <BirthdayForm />
+      ) : type === "occasion" ? (
+        <OccasionForm />
       ) : (
         <EventForm initialDay={day} />
+      )}
+    </AppShell>
+  );
+}
+
+/**
+ * The same three forms, filled in from a saved event. Which one is decided by
+ * the event itself, the way the lists sort them: a birthday by flag or title
+ * (as useBirthdays), a שמחה by its stored type. Anything else — including an
+ * occasion only detected from its title — is a free-text event.
+ */
+function EditEventPage({ id }: { id: string }) {
+  const { data: events, isLoading } = useEvents();
+  const event = events?.find((e) => e.id === id);
+
+  const kind = !event
+    ? null
+    : event.is_birthday || /^\s*יום הולדת/.test(event.title)
+      ? "birthday"
+      : isOccasionType(event.occasion)
+        ? "occasion"
+        : "event";
+
+  const title =
+    kind === "birthday" ? "עריכת יום הולדת" :
+    kind === "occasion" ? "עריכת שמחה" :
+    "עריכת אירוע";
+
+  return (
+    <AppShell title={title}>
+      {isLoading ? (
+        <div className="flex justify-center py-16">
+          <div className="size-7 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      ) : !event ? (
+        <p className="py-16 text-center text-sm text-muted-foreground">האירוע לא נמצא — אולי הוא נמחק.</p>
+      ) : kind === "birthday" ? (
+        // key: a fresh form per event, so its state starts from that event
+        <BirthdayForm key={event.id} editing={event} />
+      ) : kind === "occasion" ? (
+        <OccasionForm key={event.id} editing={event} />
+      ) : (
+        <EventForm key={event.id} editing={event} />
       )}
     </AppShell>
   );

@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, CalendarDays, ListChecks, ShoppingCart, Receipt, Briefcase, X } from "lucide-react";
+import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, CalendarDays, ListChecks, Check, X, PartyPopper } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useBirthdays } from "@/components/BirthdayList";
+import { EventTypeIcon, useOccasions } from "@/components/OccasionList";
+import { NO_DATE, OCCASIONS, occasionOf } from "@/lib/occasions";
 import { useScope, inScope } from "@/lib/scope";
-import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus, useShoppingItems } from "@/lib/queries";
+import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus, useShoppingItems, useHousehold } from "@/lib/queries";
 import { getHistory } from "@/lib/shopping-smart";
 import { WorkStatusButtons, WorkStatusChip } from "@/components/WorkDayPicker";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
@@ -14,6 +16,7 @@ import { useState, useEffect, useRef } from "react";
 const ease = "cubic-bezier(0.23, 1, 0.32, 1)";
 const todayDay = new Date().getDate();
 const todayMonth = new Date().getMonth() + 1; // 1-12, matching CalEvent.month
+const todayYear = new Date().getFullYear();
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -117,8 +120,9 @@ function Today() {
   const { data: monthlyBudget = DEFAULT_MONTHLY_BUDGET } = useMonthlyBudget();
   const toggle = useToggleTask();
   const { birthdays } = useBirthdays();
-  const { data: workDays = [], isLoading: workDaysLoading } = useWorkDays();
+  const { data: workDays = [] } = useWorkDays();
   const { data: shoppingItems = [], isLoading: shoppingLoading } = useShoppingItems();
+  const { data: household, isLoading: householdLoading } = useHousehold();
   const setWorkDay = useSetWorkDay();
   const today = todayISO();
   const todayEntry = workDays.find((d) => d.date === today);
@@ -135,6 +139,9 @@ function Today() {
   const datedBirthdays = birthdays.filter((b) => b.daysUntil < 900);
   const soonBirthdays = datedBirthdays.filter((b) => b.daysUntil <= 30);
   const upcomingBirthdays = (soonBirthdays.length ? soonBirthdays : datedBirthdays).slice(0, 3);
+  // Next three that haven't happened yet; the card hides when there are none.
+  const { upcoming: occasions } = useOccasions();
+  const upcomingOccasions = occasions.filter((o) => o.daysUntil !== NO_DATE).slice(0, 3);
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
   const isLoading = tasksLoading || eventsLoading || expensesLoading;
@@ -142,22 +149,22 @@ function Today() {
   const scopedEvents = events.filter((e) => inScope(e.category, scope));
   const scopedTasks = tasks.filter((t) => inScope(t.category, scope));
 
-  const next = scopedEvents.find((e) => occursOn(e, todayDay, todayMonth));
+  const next = scopedEvents.find((e) => occursOn(e, todayDay, todayMonth, todayYear));
 
   // The next 7 dates, resolved through Date so the week survives a month
   // boundary — `day + 6` used to run past the end of the month (31 -> 37).
   const weekDates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    return { day: d.getDate(), month: d.getMonth() + 1 };
+    return { day: d.getDate(), month: d.getMonth() + 1, year: d.getFullYear() };
   });
 
   const weekSlots = weekDates
-    .map(({ day, month }) => ({
+    .map(({ day, month, year }) => ({
       day,
       month,
       items: scopedEvents
-        .filter((e) => occursOn(e, day, month))
+        .filter((e) => occursOn(e, day, month, year))
         .sort((a, b) => a.time.localeCompare(b.time)),
     }))
     .filter((slot) => slot.items.length > 0);
@@ -321,13 +328,13 @@ function Today() {
       <div className="space-y-7 pb-10">
 
         <GettingStarted
-          ready={!workDaysLoading && !shoppingLoading}
+          ready={!shoppingLoading && !eventsLoading && !householdLoading}
           done={{
-            task: tasks.length > 0,
-            event: events.length > 0,
+            // A list that was bought and cleared still counts as started
             shopping: shoppingItems.length > 0 || Object.keys(getHistory()).length > 0,
-            expense: expenses.length > 0,
-            workday: workDays.length > 0,
+            birthday: birthdays.length > 0,
+            // A share code exists once the list is shared (or joined)
+            share: household != null,
           }}
         />
 
@@ -425,6 +432,14 @@ function Today() {
               style={{ animation: "pulse-ring 2.2s ease infinite" }}
             />
 
+            {/* Stretched over the card: tapping anywhere on it opens the edit form */}
+            <Link
+              to="/event/new"
+              search={{ type: "event", edit: next.id }}
+              aria-label={`עריכת ${next.title}`}
+              className="absolute inset-0 z-10 rounded-3xl"
+            />
+
             <p className="eyebrow pr-1">הבא בתור</p>
 
             {/* taste-skill: weight-driven hierarchy — title gets bold weight, generous leading */}
@@ -500,6 +515,68 @@ function Today() {
                           : b.daysUntil <= 60
                             ? `בעוד ${b.daysUntil} ימים`
                             : `בעוד כ-${Math.round(b.daysUntil / 30)} חודשים`}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* ── Upcoming occasions (שמחות) ── from the same list as /occasions ── */}
+        {upcomingOccasions.length > 0 && (
+          <section
+            className="surface-card rounded-3xl p-5"
+            style={{ animation: `fade-up 280ms ${ease} 70ms both` }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <p className="eyebrow flex items-center gap-1.5">
+                <PartyPopper className="size-3.5 text-primary" />
+                שמחות קרובות
+              </p>
+              <Link
+                to="/occasions"
+                className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-primary transition-[transform,opacity] duration-[140ms] active:scale-[0.90]"
+                style={{ transitionTimingFunction: ease }}
+              >
+                הכול
+                <ArrowLeft className="size-3" />
+              </Link>
+            </div>
+
+            <ul className="space-y-2.5 stagger-list">
+              {upcomingOccasions.map((o) => {
+                const today = o.daysUntil === 0;
+                const soon = o.daysUntil <= 7;
+                return (
+                  <li key={o.id} className="flex items-center gap-3">
+                    <span className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base">
+                      {OCCASIONS[o.type].emoji}
+                      {today && (
+                        <span
+                          className="absolute inset-0 rounded-full"
+                          style={{ animation: "pulse-ring 2.2s ease infinite" }}
+                        />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-bold">
+                      {o.title}
+                      {o.yearNumber != null && (
+                        <span className="mr-1.5 text-xs font-semibold text-muted-foreground">· שנה {o.yearNumber}</span>
+                      )}
+                    </span>
+                    <span
+                      className={`shrink-0 text-xs font-bold ${
+                        today ? "text-primary" : soon ? "text-amber-500" : "text-muted-foreground"
+                      }`}
+                    >
+                      {today
+                        ? "היום"
+                        : o.daysUntil === 1
+                          ? "מחר"
+                          : o.daysUntil <= 60
+                            ? `בעוד ${o.daysUntil} ימים`
+                            : `בעוד כ-${Math.round(o.daysUntil / 30)} חודשים`}
                     </span>
                   </li>
                 );
@@ -613,18 +690,20 @@ function Today() {
                             <span
                               className={`absolute -right-[1.35rem] top-[1.15rem] size-2.5 rounded-full ring-[3px] ring-background ${cat.dot}`}
                             />
-                            <div className="flex items-baseline gap-3">
-                              <span className="text-sm font-bold tabular-nums text-primary w-11 shrink-0">
-                                {e.time}
-                              </span>
-                              <span className="flex items-center gap-1.5 text-[15px] font-semibold leading-snug">
-                                {e.is_birthday && <Cake className="size-4 text-primary shrink-0" />}
-                                {e.title}
-                              </span>
-                            </div>
-                            {e.location && (
-                              <p className="mt-0.5 pr-14 text-xs text-muted-foreground">{e.location}</p>
-                            )}
+                            <Link to="/event/new" search={{ type: "event", edit: e.id }} className="block">
+                              <div className="flex items-baseline gap-3">
+                                <span className="text-sm font-bold tabular-nums text-primary w-11 shrink-0">
+                                  {e.time}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-[15px] font-semibold leading-snug">
+                                  <EventTypeIcon e={e} className="size-4 text-primary shrink-0" />
+                                  {e.title}
+                                </span>
+                              </div>
+                              {e.location && (
+                                <p className="mt-0.5 pr-14 text-xs text-muted-foreground">{e.location}</p>
+                              )}
+                            </Link>
                           </li>
                         );
                       })}
@@ -664,7 +743,7 @@ function Today() {
           const t = new Date();
           t.setDate(t.getDate() + 1);
           const tomorrowEvents = scopedEvents
-            .filter((e) => occursOn(e, t.getDate(), t.getMonth() + 1))
+            .filter((e) => occursOn(e, t.getDate(), t.getMonth() + 1, t.getFullYear()))
             .sort((a, b) => a.time.localeCompare(b.time));
           const tomorrowTasks = scopedTasks.filter(
             (t) => !t.done && (t.due.includes("מחר") || taskBucket(t) === "soon")
@@ -683,14 +762,15 @@ function Today() {
               <div className="space-y-3">
                 {tomorrowEvents.map((e) => {
                   const cat = getCat(e.category);
+                  const occasion = occasionOf(e);
                   return (
-                    <div key={e.id} className="flex items-center gap-3">
+                    <Link key={e.id} to="/event/new" search={{ type: "event", edit: e.id }} className="flex items-center gap-3">
                       <span className={`size-2 rounded-full shrink-0 ${cat.dot}`} />
                       <span className="text-xs font-bold tabular-nums text-primary w-10 shrink-0">{e.time}</span>
                       <span className="text-sm font-semibold truncate flex-1">
-                        {e.is_birthday && "🎂 "}{e.title}
+                        {e.is_birthday ? "🎂 " : occasion ? `${OCCASIONS[occasion].emoji} ` : ""}{e.title}
                       </span>
-                    </div>
+                    </Link>
                   );
                 })}
                 {tomorrowTasks.map((t) => {
@@ -769,30 +849,31 @@ function Today() {
 
 // ── First-run guide ──────────────────────────────────────────────────────────
 // A new account opens to empty sections, which says nothing about what the app
-// is for. This card names each area and links straight into it; a step ticks
-// itself off once that area has data, and the card goes away when every step
-// is done or the user hides it.
+// is for. Four short steps, ordered by value: shopping and sharing first,
+// since that's where the app sets itself apart. Each step ticks itself off
+// once it has data, and the card goes away when every step is done or the
+// user hides it.
 
 const ONBOARDING_KEY = "nahel-hakol:onboarding-dismissed";
 
-type StepKey = "task" | "event" | "shopping" | "expense" | "workday";
+type StepKey = "account" | "shopping" | "birthday" | "share";
 
 const STEPS: Array<{
   key: StepKey;
-  icon: typeof ListChecks;
   title: string;
-  desc: string;
-  to: string;
-  search?: Record<string, string>;
+  /** The verb on the step's end — what tapping it does. None: nothing to do. */
+  action?: string;
+  to?: string;
+  search?: Record<string, string | number>;
 }> = [
-  { key: "task", icon: ListChecks, title: "משימה ראשונה", desc: "מה צריך לעשות היום או השבוע", to: "/event/new", search: { type: "task" } },
-  { key: "event", icon: CalendarDays, title: "אירוע או יום הולדת", desc: "פגישות, תורים וימי הולדת בלוח אחד", to: "/event/new", search: { type: "event" } },
-  { key: "shopping", icon: ShoppingCart, title: "רשימת קניות", desc: "כותבים ״3 חלב״ והיא מסתדרת לפי הסופר", to: "/shopping" },
-  { key: "expense", icon: Receipt, title: "הוצאה ראשונה", desc: "רואים כמה נשאר מהתקציב החודשי", to: "/expense/new", search: { mode: "once" } },
-  { key: "workday", icon: Briefcase, title: "יום עבודה", desc: "משרד, בית או חופש, בלחיצה אחת", to: "/workday" },
+  { key: "account", title: "יצירת חשבון" },
+  { key: "shopping", title: "רשימת קניות ראשונה", action: "להתחיל", to: "/shopping" },
+  { key: "birthday", title: "יום הולדת שלא כדאי לשכוח", action: "להוסיף", to: "/event/new", search: { type: "birthday" } },
+  // share=1 opens the share sheet straight away (see routes/shopping.tsx)
+  { key: "share", title: "הזמנת בן/בת הזוג לרשימה", action: "להזמין", to: "/shopping", search: { share: 1 } },
 ];
 
-function GettingStarted({ ready, done }: { ready: boolean; done: Record<StepKey, boolean> }) {
+function GettingStarted({ ready, done }: { ready: boolean; done: Record<Exclude<StepKey, "account">, boolean> }) {
   const [dismissed, setDismissed] = useState(() => {
     try {
       return localStorage.getItem(ONBOARDING_KEY) === "1";
@@ -801,7 +882,9 @@ function GettingStarted({ ready, done }: { ready: boolean; done: Record<StepKey,
     }
   });
 
-  const count = STEPS.filter((s) => done[s.key]).length;
+  // Being here means the account exists, so that step is always done.
+  const isDone = (key: StepKey) => key === "account" || done[key];
+  const count = STEPS.filter((s) => isDone(s.key)).length;
   if (!ready || dismissed || count === STEPS.length) return null;
 
   function dismiss() {
@@ -818,64 +901,61 @@ function GettingStarted({ ready, done }: { ready: boolean; done: Record<StepKey,
       className="surface-card rounded-3xl p-5"
       style={{ animation: `fade-up 280ms ${ease} both` }}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="eyebrow">ברוכים הבאים לנהל הכל</p>
-          <h2 className="mt-1.5 text-[1.3rem] font-extrabold leading-tight tracking-tight">
-            כל היום שלך, במקום אחד
-          </h2>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[1.05rem] font-extrabold tracking-tight">
+          צעדים ראשונים · {count} מתוך {STEPS.length}
+        </h2>
         <button
           type="button"
           onClick={dismiss}
-          aria-label="הסתרת המדריך"
-          className="flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover-fine:hover:bg-muted"
+          aria-label="הסתרת הצעדים הראשונים"
+          className="-me-1.5 flex size-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover-fine:hover:bg-muted"
         >
           <X className="size-4" />
         </button>
       </div>
-      <p className="mt-2 text-sm text-muted-foreground">
-        משימות, יומן, רשימת קניות, הוצאות וימי עבודה. בוחרים מאיפה להתחיל:
-      </p>
 
-      <div className="mt-4 flex items-center gap-3">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-500"
-            style={{ width: `${(count / STEPS.length) * 100}%`, transitionTimingFunction: ease }}
-          />
-        </div>
-        <span className="text-xs font-bold tabular-nums text-muted-foreground">
-          {count}/{STEPS.length}
-        </span>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-500"
+          style={{ width: `${(count / STEPS.length) * 100}%`, transitionTimingFunction: ease }}
+        />
       </div>
 
-      <ul className="mt-4 space-y-2">
+      <ul className="mt-3 space-y-0.5">
         {STEPS.map((s) => {
-          const isDone = done[s.key];
+          const stepDone = isDone(s.key);
+          const row = (
+            <>
+              <span
+                className={`flex size-[18px] shrink-0 items-center justify-center rounded-full border-2 ${
+                  stepDone ? "border-success bg-success text-white" : "border-border"
+                }`}
+              >
+                {stepDone && <Check className="size-3" strokeWidth={3.5} />}
+              </span>
+              <span className={`min-w-0 flex-1 text-sm font-bold ${stepDone ? "text-muted-foreground line-through" : ""}`}>
+                {s.title}
+              </span>
+              {!stepDone && s.action && (
+                <span className="shrink-0 text-xs font-extrabold text-primary">{s.action}</span>
+              )}
+            </>
+          );
           return (
             <li key={s.key}>
-              <Link
-                to={s.to}
-                search={s.search as never}
-                className="flex items-center gap-3 rounded-2xl bg-muted/60 p-3 transition-[transform,background-color] duration-[140ms] active:scale-[0.98] hover-fine:hover:bg-muted"
-                style={{ transitionTimingFunction: ease }}
-              >
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <s.icon className="size-[18px]" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className={`block text-sm font-bold ${isDone ? "text-muted-foreground line-through" : ""}`}>
-                    {s.title}
-                  </span>
-                  <span className="block text-xs text-muted-foreground">{s.desc}</span>
-                </span>
-                {isDone ? (
-                  <CheckCircle2 className="size-5 shrink-0 fill-primary text-primary-foreground" />
-                ) : (
-                  <ArrowLeft className="size-4 shrink-0 text-primary" />
-                )}
-              </Link>
+              {stepDone || !s.to ? (
+                <div className="flex items-center gap-2.5 px-2 py-2.5">{row}</div>
+              ) : (
+                <Link
+                  to={s.to}
+                  search={s.search as never}
+                  className="flex items-center gap-2.5 rounded-xl px-2 py-2.5 transition-[transform,background-color] duration-[140ms] active:scale-[0.98] hover-fine:hover:bg-muted"
+                  style={{ transitionTimingFunction: ease }}
+                >
+                  {row}
+                </Link>
+              )}
             </li>
           );
         })}

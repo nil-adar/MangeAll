@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
 import { useEvents, useDeleteEvent, type CalEvent } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { EditEventButton } from "@/components/EditEventButton";
 
 /**
  * The saved-birthdays list. Shared by the /birthdays page and the bottom of the
@@ -30,7 +32,7 @@ function daysUntilBirthday(month: number | null | undefined, day: number): numbe
   return Number.isFinite(days) ? days : NO_DATE;
 }
 
-function countdownLabel(days: number): { text: string; color: string } {
+export function countdownLabel(days: number): { text: string; color: string } {
   if (!Number.isFinite(days) || days === NO_DATE)
     return { text: "תאריך חסר", color: "text-muted-foreground" };
   if (days === 0) return { text: "🎉 היום!", color: "text-primary" };
@@ -41,7 +43,7 @@ function countdownLabel(days: number): { text: string; color: string } {
 }
 
 /** "יום הולדת ל<name>" / "יום הולדת של <name>" → name */
-function extractName(title: string) {
+export function extractName(title: string) {
   return title.replace(/^\s*יום הולדת\s*(של\s*|ל)?/, "").trim() || title;
 }
 
@@ -106,15 +108,16 @@ export function BirthdayList({ birthdays }: { birthdays: Birthday[] }) {
             {name.charAt(0)}
           </span>
         )}
-        <div className="flex-1 min-w-0">
+        <Link to="/event/new" search={{ type: "event", edit: b.id }} className="flex-1 min-w-0">
           <p className="text-sm font-bold truncate">{name}</p>
           {monthLabel && (
             <p className="text-xs text-muted-foreground">{b.day} ב{monthLabel}</p>
           )}
-        </div>
+        </Link>
         <span className={cn("text-xs shrink-0 mr-1", soon ? `font-bold ${color}` : "text-muted-foreground")}>
           {text}
         </span>
+        <EditEventButton id={b.id} title={b.title} />
         <button
           type="button"
           onClick={() => handleDelete(b.id)}
