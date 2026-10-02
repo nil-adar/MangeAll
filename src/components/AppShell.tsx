@@ -2,6 +2,7 @@ import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { CalendarDays, Home, Plus, Wallet, CalendarPlus, ListPlus, Receipt, ShoppingCart, Cake, PartyPopper, Repeat, LogOut, ChevronRight, User, Briefcase } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { Tip } from "@/components/Tip";
 import { ScopeSwitch } from "@/lib/scope";
 import { supabase } from "@/lib/supabase";
 import { useProfile } from "@/lib/queries";
@@ -216,6 +217,10 @@ export function AppShell({
                   <DrawerTitle>מה נוסיף?</DrawerTitle>
                 </DrawerHeader>
                 <div className="space-y-5 p-4 pb-8">
+                  {/* Shown the first time the sheet opens: the + is the way in to everything */}
+                  <Tip id="quick-add" title="הכול מכאן">
+                    משימה, אירוע, יום הולדת, הוצאה או פריט לקניות, מכל מסך באפליקציה.
+                  </Tip>
                   {quickGroups.map((g) => (
                     <div key={g.title}>
                       <p className="eyebrow mb-2.5">{g.title}</p>

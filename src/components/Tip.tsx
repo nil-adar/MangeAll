@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 const PREFIX = "nahel-hakol:tip:";
 
 /** Every tip in the app — resetTips() clears exactly these. */
-export const TIP_IDS = ["shopping-mode", "edit-event"] as const;
+export const TIP_IDS = ["shopping-mode", "edit-event", "quick-add"] as const;
 export type TipId = (typeof TIP_IDS)[number];
 
 function isSeen(id: TipId): boolean {
