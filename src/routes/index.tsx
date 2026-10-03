@@ -3,9 +3,11 @@ import { Clock, MapPin, ArrowLeft, Cake, CheckCircle2, Circle, TrendingUp, Calen
 import { AppShell } from "@/components/AppShell";
 import { useBirthdays } from "@/components/BirthdayList";
 import { EventTypeIcon, useOccasions } from "@/components/OccasionList";
+import { TipsCard } from "@/components/TipsCard";
+import { IncomingInvites } from "@/components/HouseholdInvites";
 import { NO_DATE, OCCASIONS, occasionOf } from "@/lib/occasions";
 import { useScope, inScope } from "@/lib/scope";
-import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus, useShoppingItems, useHousehold } from "@/lib/queries";
+import { useTasks, useEvents, useExpenses, useToggleTask, useMonthlyBudget, getCat, occursOn, isThisMonth, useWorkDays, useSetWorkDay, todayISO, isWorkedStatus, useShoppingItems, useHousehold, useProfile } from "@/lib/queries";
 import { getHistory } from "@/lib/shopping-smart";
 import { WorkStatusButtons, WorkStatusChip } from "@/components/WorkDayPicker";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
@@ -43,6 +45,21 @@ function greeting() {
   if (h < 17) return "צהריים טובים";
   if (h < 21) return "ערב טוב";
   return "לילה טוב";
+}
+
+/** "בוקר טוב, נועה": first name only, and just the greeting until there is one. */
+function greetingFor(name: string | null | undefined) {
+  const first = name?.trim().split(/\s+/)[0];
+  return first ? `${greeting()}, ${first}` : greeting();
+}
+
+/** The header's subtitle: today's plan, or tomorrow's once the day is over (21:00). */
+function planLabel() {
+  const now = new Date();
+  const late = now.getHours() >= 21;
+  const day = late ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1) : now;
+  const date = day.toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" });
+  return late ? `מה הלו״ז מחר? · ${date}` : `אז מה הלו״ז היום? · ${date}`;
 }
 
 function dayLabel(day: number, month: number) {
@@ -118,6 +135,7 @@ function Today() {
   const { data: events = [], isLoading: eventsLoading } = useEvents();
   const { data: expenses = [], isLoading: expensesLoading } = useExpenses();
   const { data: monthlyBudget = DEFAULT_MONTHLY_BUDGET } = useMonthlyBudget();
+  const { data: profile } = useProfile();
   const toggle = useToggleTask();
   const { birthdays } = useBirthdays();
   const { data: workDays = [] } = useWorkDays();
@@ -205,11 +223,8 @@ function Today() {
 
   const monthlySpent = oneTimeTotal + monthlyRecurringTotal + yearlyAsMonthly;
   const percent = Math.min(100, Math.round((monthlySpent / monthlyBudget) * 100));
-  const dateLabel = new Date().toLocaleDateString("he-IL", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  const headerTitle = greetingFor(profile?.display_name);
+  const headerSubtitle = planLabel();
 
   const countedSpent = useCountUp(monthlySpent);
   const todayTaskCount = openTasks.filter((t) => taskBucket(t) === "today").length;
@@ -229,7 +244,7 @@ function Today() {
 
   if (isLoading) {
     return (
-      <AppShell title={greeting()} subtitle={dateLabel}>
+      <AppShell title={headerTitle} subtitle={headerSubtitle}>
         {/* taste-skill: skeletal shimmer, never circular spinners */}
         <div className="space-y-4 pt-2">
           {[100, 72, 88].map((w, i) => (
@@ -247,7 +262,7 @@ function Today() {
   }
 
   return (
-    <AppShell title={greeting()} subtitle={dateLabel}>
+    <AppShell title={headerTitle} subtitle={headerSubtitle}>
       <style>{`
         @keyframes shimmer {
           0%   { background-position: -200% 0; }
@@ -327,6 +342,9 @@ function Today() {
 
       <div className="space-y-7 pb-10">
 
+        {/* An invite to a shared list waits here until answered */}
+        <IncomingInvites className="space-y-3" />
+
         <GettingStarted
           ready={!shoppingLoading && !eventsLoading && !householdLoading}
           done={{
@@ -337,6 +355,8 @@ function Today() {
             share: household != null,
           }}
         />
+
+        <TipsCard />
 
         {/* ── Daily work-status question ── */}
         <section

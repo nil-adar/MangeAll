@@ -145,6 +145,20 @@ export type Database = {
       leave_household: { Args: Record<string, never>; Returns: undefined };
       approve_member: { Args: { member_id: string }; Returns: undefined };
       remove_member: { Args: { member_id: string }; Returns: undefined };
+      // Invites — a link the invitee accepts, or an in-app invite by email
+      invite_info: {
+        Args: { token: string };
+        Returns: { inviter: string; member_count: number; already_member: boolean; status: string }[];
+      };
+      create_invite_link: { Args: Record<string, never>; Returns: string };
+      join_by_invite: { Args: { token: string }; Returns: string };
+      invite_by_email: { Args: { invitee_email: string }; Returns: string };
+      my_invites: {
+        Args: Record<string, never>;
+        Returns: { id: string; inviter: string; member_count: number; created_at: string }[];
+      };
+      respond_invite: { Args: { invite_id: string; accept: boolean }; Returns: string };
+      reset_invite_link: { Args: Record<string, never>; Returns: undefined };
     };
   };
 };

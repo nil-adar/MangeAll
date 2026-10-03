@@ -16,3 +16,10 @@ export const shekel = (n: number) =>
 
 /** Default monthly budget (used as fallback before user setting loads) */
 export const DEFAULT_MONTHLY_BUDGET = 6500;
+
+/**
+ * The live site. Links meant for someone else (an invite) always point here —
+ * window.location.origin would hand out "localhost" links from a dev machine.
+ * Auth redirects stay on window.location.origin: those come back to this browser.
+ */
+export const SITE_URL = "https://mangeall.onrender.com";

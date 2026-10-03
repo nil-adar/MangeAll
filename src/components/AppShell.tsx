@@ -26,7 +26,7 @@ import {
 // Calendar and tasks share one "יומן" tab and switch between each other
 // with the segmented control in the header (see PLANNER below).
 const tabs = [
-  { to: "/", label: "היום", icon: Home, match: ["/"] },
+  { to: "/", label: "בית", icon: Home, match: ["/"] },
   { to: "/calendar", label: "יומן", icon: CalendarDays, match: ["/calendar", "/tasks"] },
   { to: "/shopping", label: "קניות", icon: ShoppingCart, match: ["/shopping"] },
   { to: "/finance", label: "כספים", icon: Wallet, match: ["/finance"] },
@@ -141,7 +141,7 @@ export function AppShell({
               ) : (
                 <h1 className="text-2xl font-bold tracking-tight truncate">{title}</h1>
               )}
-              {subtitle && <p className="mt-0.5 text-sm text-muted-foreground">{subtitle}</p>}
+              {subtitle && <p className="mt-0.5 truncate text-sm text-muted-foreground">{subtitle}</p>}
             </div>
           </div>
           {action && <div className="shrink-0">{action}</div>}
@@ -218,9 +218,7 @@ export function AppShell({
                 </DrawerHeader>
                 <div className="space-y-5 p-4 pb-8">
                   {/* Shown the first time the sheet opens: the + is the way in to everything */}
-                  <Tip id="quick-add" title="הכול מכאן">
-                    משימה, אירוע, יום הולדת, הוצאה או פריט לקניות, מכל מסך באפליקציה.
-                  </Tip>
+                  <Tip id="quick-add" />
                   {quickGroups.map((g) => (
                     <div key={g.title}>
                       <p className="eyebrow mb-2.5">{g.title}</p>

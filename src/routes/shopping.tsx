@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   Carrot, Croissant, Milk, Beef, Wheat, CupSoda, Snowflake, SprayCan, ShoppingBasket,
   ShoppingCart, Plus, Minus, X, Check, Repeat2, ChevronDown, PartyPopper,
-  Users, Copy, Share2, LogOut, UserCheck, Clock3,
+  Users, Copy, LogOut, UserCheck, Clock3, Mail, MessageCircle, UserPlus,
 } from "lucide-react";
 import {
   Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription,
@@ -18,8 +18,9 @@ import {
   useUpdateShoppingQuantity,
   useHousehold,
   useHouseholdPeople,
-  useCreateHousehold,
-  useJoinHousehold,
+  useCreateInviteLink,
+  useInviteByEmail,
+  useResetInviteLink,
   useLeaveHousehold,
   useApproveMember,
   useRemoveMember,
@@ -32,12 +33,22 @@ import {
 } from "@/lib/shopping-smart";
 import { cn } from "@/lib/utils";
 import { Tip } from "@/components/Tip";
+import { IncomingInvites, InviteLinkSheet } from "@/components/HouseholdInvites";
+import { clearPendingInvite, rememberInvite } from "@/lib/pending-invite";
 
 export const Route = createFileRoute("/shopping")({
   // ?share=1 opens the share sheet on arrival — the home page's
   // "הזמנת בן/בת הזוג" first step links here.
-  validateSearch: (search: Record<string, unknown>): { share?: 1 } =>
-    search["share"] === 1 || search["share"] === "1" ? { share: 1 } : {},
+  // ?invite=TOKEN is the invite link sent from the sheet: it asks the invitee
+  // whether to join. Someone signed out goes through /login first and comes
+  // back here, token intact (login keeps the link even across sign-up).
+  validateSearch: (search: Record<string, unknown>): { share?: 1; invite?: string } => {
+    const out: { share?: 1; invite?: string } = {};
+    if (search["share"] === 1 || search["share"] === "1") out.share = 1;
+    const invite = String(search["invite"] ?? "").trim().toLowerCase();
+    if (/^[a-f0-9]{32}$/.test(invite)) out.invite = invite;
+    return out;
+  },
   component: ShoppingPage,
 });
 
@@ -388,9 +399,49 @@ function AisleGroup({ cat, items, shopping }: { cat: CategoryKey; items: Shoppin
 
 // ── Sharing ──────────────────────────────────────────────────────────────────
 
-/** The code, big enough to read aloud across the kitchen. */
-function CodeDisplay({ code }: { code: string }) {
+/**
+ * The two ways in, both ending with the friend saying yes:
+ * a link to copy or send (they open it and join), or an invite by exact email
+ * (it waits in their app). No user directory to search — only an email they know.
+ */
+const INVITE_STEPS = [
+  "בוחרים איך לשלוח: וואטסאפ, מייל או העתקה. כל שליחה יוצרת קישור אישי חדש.",
+  "החבר פותח את הקישור. אין לו חשבון? נרשם בדקה, וההזמנה מחכה לו בסוף.",
+  "הוא לוחץ ״להצטרף״, ומאותו רגע שניכם רואים אותה רשימה.",
+];
+
+/** What the friend receives: what this is and what to do, before they tap anything. */
+function inviteMessage(link: string): string {
+  return [
+    "היי! הזמנתי אותך לרשימת הקניות המשותפת שלי ב״נהל הכל״ 🛒",
+    "כל מה שאחד מאיתנו מוסיף או מסמן מופיע מיד אצל השני.",
+    "",
+    `להצטרפות: ${link}`,
+    "",
+    "אין לך חשבון? נרשמים בדקה דרך הקישור, וההזמנה מחכה בסוף.",
+    "הקישור אישי: לכניסה אחת, ותקף 7 ימים.",
+  ].join("\n");
+}
+
+const INVITE_SUBJECT = "הזמנה לרשימת הקניות המשותפת ב״נהל הכל״";
+const ANOTHER = " לחבר נוסף, שלחו שוב: כל קישור הוא לאדם אחד.";
+
+/**
+ * Two ways in, both ending with the friend saying yes:
+ * a personal link sent by WhatsApp / email / copy (one person, one use, 7 days),
+ * or an in-app invite by exact account email. No user directory to search.
+ */
+function InviteSection({ canRevoke }: { canRevoke: boolean }) {
+  const createLink = useCreateInviteLink();
+  const inviteByEmail = useInviteByEmail();
+  const revokeLinks = useResetInviteLink();
   const [copied, setCopied] = useState(false);
+  // After a send: what happens next, so sending isn't a leap into silence
+  const [sentHint, setSentHint] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [emailResult, setEmailResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
 
   useEffect(() => {
     if (!copied) return;
@@ -398,65 +449,220 @@ function CodeDisplay({ code }: { code: string }) {
     return () => clearTimeout(t);
   }, [copied]);
 
-  async function copy() {
+  useEffect(() => {
+    if (!confirmRevoke) return;
+    const t = setTimeout(() => setConfirmRevoke(false), 3500);
+    return () => clearTimeout(t);
+  }, [confirmRevoke]);
+
+  async function newLink(): Promise<string | null> {
+    setLinkError(null);
+    setSentHint(null);
     try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
+      return await createLink.mutateAsync();
     } catch {
-      /* clipboard blocked — the code is on screen to type by hand */
+      setLinkError("לא הצלחנו ליצור קישור. נסה/י שוב.");
+      return null;
     }
   }
 
-  async function share() {
-    const text = `הצטרף לרשימת הקניות שלי ב"נהל הכל" עם הקוד ${code}`;
+  async function viaWhatsApp() {
+    // Opened before the link exists: a window opened after an await counts as
+    // an unrequested popup, and browsers block it.
+    const win = window.open("", "_blank");
+    const link = await newLink();
+    if (!link) {
+      win?.close();
+      return;
+    }
+    const url = `https://wa.me/?text=${encodeURIComponent(inviteMessage(link))}`;
+    if (win) {
+      win.opener = null;
+      win.location.href = url;
+    } else {
+      window.location.href = url;
+    }
+    setSentHint("נפתח וואטסאפ עם הודעה מוכנה: בחרו את החבר ושלחו. כשיאשר, הוא יופיע כאן ברשימת המשתתפים." + ANOTHER);
+  }
+
+  async function viaEmail() {
+    const link = await newLink();
+    if (!link) return;
+    window.location.href =
+      `mailto:?subject=${encodeURIComponent(INVITE_SUBJECT)}&body=${encodeURIComponent(inviteMessage(link))}`;
+    setSentHint("נפתחה טיוטת מייל עם ההזמנה: הוסיפו את כתובת החבר ושלחו." + ANOTHER);
+  }
+
+  async function viaCopy() {
+    // The clipboard needs the tap itself, not a moment later — hand it a
+    // promise of the text now (supported where ClipboardItem takes promises),
+    // and fall back to writing once the link is back.
+    const pending = newLink();
     try {
-      if (navigator.share) await navigator.share({ text });
-      else await copy();
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/plain": pending.then((l) => {
+              if (!l) throw new Error("no link");
+              return new Blob([inviteMessage(l)], { type: "text/plain" });
+            }),
+          }),
+        ]);
+      } else {
+        const link = await pending;
+        if (!link) return;
+        await navigator.clipboard.writeText(inviteMessage(link));
+      }
+      setCopied(true);
+      setSentHint("ההזמנה הועתקה, עם הקישור והסבר קצר. הדביקו אותה בהודעה לחבר." + ANOTHER);
     } catch {
-      /* the user dismissed the share sheet */
+      const link = await pending;
+      if (link) setLinkError(`לא הצלחנו להעתיק אוטומטית. הקישור: ${link}`);
     }
   }
+
+  async function invite() {
+    const address = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      setEmailResult({ ok: false, text: "נראה שהאימייל לא שלם" });
+      return;
+    }
+    setEmailResult(null);
+    try {
+      const result = await inviteByEmail.mutateAsync(address);
+      if (result === "invited") {
+        setEmailResult({ ok: true, text: "ההזמנה נשלחה ✓ היא מחכה לו/ה בדף הבית של האפליקציה. כשיאשר/תאשר, תראו אותו/ה כאן ברשימת המשתתפים." });
+        setEmail("");
+      } else if (result === "not_found") {
+        setEmailResult({ ok: false, text: "אין חשבון בנהל הכל עם האימייל הזה. שלחו לו/ה קישור בוואטסאפ או במייל למעלה: אפשר להירשם ממנו, וההזמנה תחכה בסוף ההרשמה." });
+      } else if (result === "already_member") {
+        setEmailResult({ ok: true, text: "הוא/היא כבר ברשימה ✓" });
+      } else {
+        setEmailResult({ ok: false, text: "זה האימייל שלך 🙂" });
+      }
+    } catch {
+      setEmailResult({ ok: false, text: "ההזמנה נכשלה. נסה/י שוב." });
+    }
+  }
+
+  const sendBtn =
+    "flex flex-col items-center justify-center gap-1.5 rounded-2xl py-3 text-xs font-bold transition-[transform,opacity] duration-150 active:scale-[0.96] disabled:opacity-60";
 
   return (
-    <div className="space-y-3">
-      <div
-        className="rounded-3xl bg-primary/8 py-5 text-center"
-        // Enters from 0.96, never from nothing
-        style={{ animation: `pop-code 200ms ${EASE} both` }}
-      >
-        <p className="font-display text-[2rem] font-extrabold tracking-[0.35em] text-primary">
-          {code}
+    <div className="space-y-5">
+      <section>
+        <p className="text-sm font-bold">שליחת הזמנה לחבר</p>
+        {/* The whole journey up front: what the friend gets, and what they need */}
+        <ol className="mt-2 space-y-1.5">
+          {INVITE_STEPS.map((step, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+              <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                {i + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button
+            onClick={viaWhatsApp}
+            disabled={createLink.isPending}
+            className={cn(sendBtn, "text-white")}
+            style={{ backgroundColor: "#1FAF54", transitionTimingFunction: EASE }}
+          >
+            <MessageCircle className="size-5" />
+            וואטסאפ
+          </button>
+          <button
+            onClick={viaEmail}
+            disabled={createLink.isPending}
+            className={cn(sendBtn, "bg-muted")}
+            style={{ transitionTimingFunction: EASE }}
+          >
+            <Mail className="size-5" />
+            מייל
+          </button>
+          <button
+            onClick={viaCopy}
+            disabled={createLink.isPending}
+            className={cn(sendBtn, "bg-muted")}
+            style={{ transitionTimingFunction: EASE }}
+          >
+            {/* Transition, not keyframes: tapping copy twice retargets */}
+            <span className="relative flex size-5 items-center justify-center">
+              <Copy
+                className="absolute size-5 transition-[opacity,transform] duration-150"
+                style={{ transitionTimingFunction: EASE, opacity: copied ? 0 : 1, transform: copied ? "scale(0.9)" : "scale(1)" }}
+              />
+              <Check
+                className="absolute size-5 text-success transition-[opacity,transform] duration-150"
+                style={{ transitionTimingFunction: EASE, opacity: copied ? 1 : 0, transform: copied ? "scale(1)" : "scale(0.9)" }}
+              />
+            </span>
+            {copied ? "הועתק" : "העתקה"}
+          </button>
+        </div>
+
+        {sentHint && !linkError && (
+          <p className="mt-2 text-xs font-semibold text-success" role="status">{sentHint}</p>
+        )}
+        {linkError && <p className="mt-2 break-all text-xs font-semibold text-destructive">{linkError}</p>}
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          הקישור אישי: מתאים לכניסה אחת ותקף 7 ימים. גם אם יועבר הלאה, רק הראשון שיפתח ייכנס.
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">הקוד לשיתוף</p>
+        {canRevoke && (
+          <button
+            onClick={() => (confirmRevoke ? (revokeLinks.mutate(), setConfirmRevoke(false)) : setConfirmRevoke(true))}
+            className="mt-1.5 text-[11px] font-semibold text-muted-foreground underline-offset-2 hover-fine:hover:underline"
+          >
+            {confirmRevoke ? "לחץ שוב — קישורים שעוד לא נוצלו יפסיקו לעבוד" : "שלחת למישהו בטעות? ביטול קישורים שנשלחו"}
+          </button>
+        )}
+      </section>
+
+      <div className="flex items-center gap-3">
+        <span className="h-px flex-1 bg-border" />
+        <span className="text-xs text-muted-foreground">או</span>
+        <span className="h-px flex-1 bg-border" />
       </div>
 
-      <div className="flex gap-2">
-        <button
-          onClick={copy}
-          className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-muted py-3 text-sm font-bold transition-colors duration-150"
-          style={{ transitionTimingFunction: EASE }}
-        >
-          {/* Transition, not keyframes: tapping copy twice retargets */}
-          <span className="relative flex size-4 items-center justify-center">
-            <Copy
-              className="absolute size-4 transition-[opacity,transform] duration-150"
-              style={{ transitionTimingFunction: EASE, opacity: copied ? 0 : 1, transform: copied ? "scale(0.9)" : "scale(1)" }}
-            />
-            <Check
-              className="absolute size-4 text-success transition-[opacity,transform] duration-150"
-              style={{ transitionTimingFunction: EASE, opacity: copied ? 1 : 0, transform: copied ? "scale(1)" : "scale(0.9)" }}
-            />
-          </span>
-          {copied ? "הועתק" : "העתקה"}
-        </button>
-        <button
-          onClick={share}
-          className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary py-3 text-sm font-bold text-primary-foreground"
-        >
-          <Share2 className="size-4" />
-          שליחה
-        </button>
-      </div>
+      <section>
+        <p className="text-sm font-bold">לחבר כבר יש חשבון? הזמנה ישירה</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          מקלידים את האימייל שאיתו הוא נרשם לנהל הכל. ההזמנה תחכה לו בדף הבית של האפליקציה עד שיאשר. אין לו חשבון? שלחו קישור למעלה.
+        </p>
+        <div className="mt-2.5 flex gap-2">
+          <input
+            type="email"
+            inputMode="email"
+            autoComplete="off"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setEmailResult(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") invite(); }}
+            placeholder="name@example.com"
+            dir="ltr"
+            aria-label="האימייל של החבר"
+            className="min-w-0 flex-1 rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+          />
+          <button
+            onClick={invite}
+            disabled={!email.trim() || inviteByEmail.isPending}
+            className="flex shrink-0 items-center gap-1.5 rounded-2xl bg-primary px-4 text-sm font-bold text-primary-foreground disabled:opacity-40"
+          >
+            <UserPlus className="size-4" />
+            {inviteByEmail.isPending ? "..." : "הזמנה"}
+          </button>
+        </div>
+        {emailResult && (
+          <p
+            className={cn("mt-2 text-xs font-semibold", emailResult.ok ? "text-success" : "text-destructive")}
+            role="status"
+          >
+            {emailResult.text}
+          </p>
+        )}
+      </section>
     </div>
   );
 }
@@ -563,13 +769,10 @@ function PeopleList({ isOwner }: { isOwner: boolean }) {
 
 function ShareSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { data: household } = useHousehold();
-  const createHousehold = useCreateHousehold();
-  const joinHousehold = useJoinHousehold();
   const leaveHousehold = useLeaveHousehold();
 
-  const [joinCode, setJoinCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const waiting = household?.myStatus === "pending";
+  const shared = !!household && household.memberCount > 1;
   const [confirmLeave, setConfirmLeave] = useState(false);
 
   useEffect(() => {
@@ -577,19 +780,6 @@ function ShareSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
     const t = setTimeout(() => setConfirmLeave(false), 3500);
     return () => clearTimeout(t);
   }, [confirmLeave]);
-
-  async function handleJoin() {
-    const code = joinCode.trim().toUpperCase();
-    if (code.length < 4) return;
-    setError(null);
-    try {
-      const result = await joinHousehold.mutateAsync(code);
-      if (result === "not_found") setError("קוד לא נמצא — בדוק שוב");
-      else setJoinCode("");
-    } catch {
-      setError("ההצטרפות נכשלה — נסה שוב");
-    }
-  }
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -599,13 +789,16 @@ function ShareSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
           <DrawerDescription>
             {waiting
               ? "הבקשה נשלחה. הרשימה תיפתח ברגע שתאושר"
-              : household
+              : shared
                 ? "כל שינוי אצל אחד מכם מופיע מיד אצל השני"
-                : "שתפו קוד אחד, ותראו את אותה רשימה"}
+                : "הזמינו מישהו מהבית, ותראו את אותה רשימה"}
           </DrawerDescription>
         </DrawerHeader>
 
-        <div className="space-y-5 px-4 pb-8">
+        <div className="max-h-[70svh] space-y-5 overflow-y-auto px-4 pb-8">
+          {/* Invites addressed to me come first: answering one is the quickest way in */}
+          <IncomingInvites className="space-y-3" />
+
           {waiting ? (
             <>
               {/* Waiting on the owner — a calm hold state, not an error */}
@@ -625,68 +818,32 @@ function ShareSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
                 ביטול הבקשה
               </button>
             </>
-          ) : household ? (
-            <>
-              <CodeDisplay code={household.code} />
-              <PeopleList isOwner={household.isOwner} />
-              <button
-                onClick={() => (confirmLeave ? leaveHousehold.mutate() : setConfirmLeave(true))}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-bold transition-colors duration-200"
-                style={{
-                  transitionTimingFunction: EASE,
-                  backgroundColor: confirmLeave
-                    ? "color-mix(in oklch, var(--destructive) 14%, transparent)"
-                    : "var(--muted)",
-                  color: confirmLeave ? "var(--destructive)" : "var(--muted-foreground)",
-                }}
-              >
-                <LogOut className="size-4" />
-                {confirmLeave ? "לחץ שוב כדי לצאת" : household.isOwner ? "ביטול השיתוף" : "יציאה מהשיתוף"}
-              </button>
-              <p className="text-center text-[11px] text-muted-foreground">
-                ביציאה הפריטים שהוספת חוזרים לרשימה הפרטית שלך
-              </p>
-            </>
           ) : (
             <>
-              <button
-                onClick={() => createHousehold.mutate()}
-                disabled={createHousehold.isPending}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
-              >
-                <Users className="size-4" />
-                {createHousehold.isPending ? "יוצר..." : "יצירת רשימה משותפת"}
-              </button>
+              <InviteSection canRevoke={!!household?.isOwner} />
 
-              <div className="flex items-center gap-3">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-xs text-muted-foreground">או</span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-semibold">קיבלת קוד?</p>
-                <div className="flex gap-2">
-                  <input
-                    value={joinCode}
-                    onChange={(e) => { setJoinCode(e.target.value.toUpperCase()); setError(null); }}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
-                    placeholder="ABC123"
-                    maxLength={8}
-                    dir="ltr"
-                    autoCapitalize="characters"
-                    className="min-w-0 flex-1 rounded-2xl border border-border bg-card px-4 py-3 text-center text-lg font-bold tracking-[0.3em] outline-none focus:ring-2 focus:ring-primary/40"
-                  />
+              {shared && household && (
+                <>
+                  <PeopleList isOwner={household.isOwner} />
                   <button
-                    onClick={handleJoin}
-                    disabled={joinCode.trim().length < 4 || joinHousehold.isPending}
-                    className="shrink-0 rounded-2xl bg-primary px-5 text-sm font-bold text-primary-foreground disabled:opacity-40"
+                    onClick={() => (confirmLeave ? leaveHousehold.mutate() : setConfirmLeave(true))}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-bold transition-colors duration-200"
+                    style={{
+                      transitionTimingFunction: EASE,
+                      backgroundColor: confirmLeave
+                        ? "color-mix(in oklch, var(--destructive) 14%, transparent)"
+                        : "var(--muted)",
+                      color: confirmLeave ? "var(--destructive)" : "var(--muted-foreground)",
+                    }}
                   >
-                    {joinHousehold.isPending ? "..." : "הצטרפות"}
+                    <LogOut className="size-4" />
+                    {confirmLeave ? "לחץ שוב כדי לצאת" : household.isOwner ? "ביטול השיתוף" : "יציאה מהשיתוף"}
                   </button>
-                </div>
-                {error && <p className="text-xs font-semibold text-destructive">{error}</p>}
-              </div>
+                  <p className="text-center text-[11px] text-muted-foreground">
+                    ביציאה הפריטים שהוספת חוזרים לרשימה הפרטית שלך
+                  </p>
+                </>
+              )}
             </>
           )}
         </div>
@@ -729,7 +886,7 @@ function ShareBar({ onOpen }: { onOpen: () => void }) {
         </span>
       ) : (
         <span className="text-[11px] font-semibold text-primary">
-          {household ? "הקוד" : "שיתוף"}
+          {household ? "הזמנה" : "שיתוף"}
         </span>
       )}
     </button>
@@ -760,13 +917,18 @@ function ShoppingPage() {
   const clearChecked = useClearCheckedShoppingItems();
   const [shopping, setShopping] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
-  const { share } = Route.useSearch();
+  const { share, invite } = Route.useSearch();
   const navigate = useNavigate();
   const [shareOpen, setShareOpen] = useState(share === 1);
-  // Drop the flag once it's done its job, so a refresh or Back doesn't reopen it
+  // Kept past the URL clean-up below, until the invitee answers
+  const [inviteToken, setInviteToken] = useState(invite ?? null);
+  // Drop the flags once they've done their job, so a refresh or Back doesn't reopen them
   useEffect(() => {
-    if (share === 1) navigate({ to: "/shopping", search: {}, replace: true });
-  }, [share, navigate]);
+    // Saved first: if this session turns out to be stale and signs out, the
+    // invite still survives the trip through /login (see lib/pending-invite.ts)
+    if (invite != null) rememberInvite(`/shopping?invite=${invite}`);
+    if (share === 1 || invite != null) navigate({ to: "/shopping", search: {}, replace: true });
+  }, [share, invite, navigate]);
   const { data: household } = useHousehold();
   // Live sync only matters once the list is actually shared
   useShoppingRealtime(!!household); // also fires while a request is pending
@@ -812,12 +974,11 @@ function ShoppingPage() {
         </div>
       ) : (
         <div className="space-y-4 pb-28">
+          {!shopping && <IncomingInvites className="space-y-3" />}
           {!shopping && <QuickAdd items={items} />}
           {!shopping && <ShareBar onOpen={() => setShareOpen(true)} />}
           {shopping && (
-            <Tip id="shopping-mode" title="מצב קנייה">
-              נגיעה בפריט מעבירה אותו לעגלה, והמסך יישאר דולק עד שתלחצו ״סיום״.
-            </Tip>
+            <Tip id="shopping-mode" />
           )}
 
           {/* Progress — transform only, grows from the right (RTL) */}
@@ -910,6 +1071,15 @@ function ShoppingPage() {
       )}
 
       <ShareSheet open={shareOpen} onOpenChange={setShareOpen} />
+      {inviteToken && (
+        <InviteLinkSheet
+          token={inviteToken}
+          onDone={() => {
+            clearPendingInvite(); // answered: don't bring it back after the next sign-in
+            setInviteToken(null);
+          }}
+        />
+      )}
     </AppShell>
   );
 }

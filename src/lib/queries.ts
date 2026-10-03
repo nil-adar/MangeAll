@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
-import { categories, type CategoryKey } from "./config";
+import { categories, SITE_URL, type CategoryKey } from "./config";
 
 // Helper: safe category lookup
 export function getCat(category: string) {
@@ -431,24 +431,169 @@ export type HouseholdPerson = {
   isMe: boolean;
 };
 
+async function fetchHousehold(): Promise<Household> {
+  const { data, error } = await supabase.rpc("my_household");
+  // The sharing migration may not have run yet — degrade to "not shared"
+  // instead of breaking the shopping page.
+  if (error) return null;
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return null;
+  return {
+    code: row.code as string,
+    memberCount: (row.member_count as number) ?? 1,
+    pendingCount: (row.pending_count as number) ?? 0,
+    isOwner: (row.is_owner as boolean) ?? false,
+    myStatus: ((row.my_status as string) === "pending" ? "pending" : "active"),
+  };
+}
+
 /** The household I'm in, or null when my list is private. */
 export function useHousehold() {
+  return useQuery({ queryKey: ["household"], queryFn: fetchHousehold });
+}
+
+/**
+ * A fresh personal invite link: one person, one use, 7 days. Creates the
+ * shared list first if there isn't one yet — so sharing works from a private
+ * list in one tap. Every send gets its own link.
+ */
+export function useCreateInviteLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<string> => {
+      const { data, error } = await supabase.rpc("create_invite_link");
+      if (error) throw error;
+      return inviteLink(data);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["household"] });
+      qc.invalidateQueries({ queryKey: ["shopping"] });
+    },
+  });
+}
+
+export function inviteLink(token: string): string {
+  return `${SITE_URL}/shopping?invite=${token}`;
+}
+
+export type InviteLinkStatus = "ok" | "used" | "expired";
+
+export type InviteInfo = {
+  inviter: string;
+  memberCount: number;
+  alreadyMember: boolean;
+  status: InviteLinkStatus;
+} | null;
+
+/** Who's behind an invite link — shown before the invitee accepts. null: no such link (or cancelled). */
+export function useInviteInfo(token: string | undefined) {
   return useQuery({
-    queryKey: ["household"],
-    queryFn: async (): Promise<Household> => {
-      const { data, error } = await supabase.rpc("my_household");
-      // The sharing migration may not have run yet — degrade to "not shared"
-      // instead of breaking the shopping page.
-      if (error) return null;
-      const row = Array.isArray(data) ? data[0] : data;
+    queryKey: ["invite-info", token],
+    enabled: !!token,
+    queryFn: async (): Promise<InviteInfo> => {
+      const { data, error } = await supabase.rpc("invite_info", { token: token! });
+      if (error) throw error;
+      const row = data?.[0];
       if (!row) return null;
-      return {
-        code: row.code as string,
-        memberCount: (row.member_count as number) ?? 1,
-        pendingCount: (row.pending_count as number) ?? 0,
-        isOwner: (row.is_owner as boolean) ?? false,
-        myStatus: ((row.my_status as string) === "pending" ? "pending" : "active"),
-      };
+      const status: InviteLinkStatus = row.status === "used" || row.status === "expired" ? row.status : "ok";
+      return { inviter: row.inviter, memberCount: row.member_count, alreadyMember: row.already_member, status };
+    },
+  });
+}
+
+export type EnterResult = "joined" | "in_other_household" | "not_found" | "used" | "expired";
+
+function useEnterHousehold<T>(fn: (arg: T) => Promise<string>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["household"] });
+      qc.invalidateQueries({ queryKey: ["household-people"] });
+      qc.invalidateQueries({ queryKey: ["my-invites"] });
+      qc.invalidateQueries({ queryKey: ["invite-info"] });
+      qc.invalidateQueries({ queryKey: ["shopping"] });
+    },
+  });
+}
+
+/** The invitee said yes to a link: straight in, no owner approval. */
+export function useJoinByInvite() {
+  return useEnterHousehold<string>(async (token) => {
+    const { data, error } = await supabase.rpc("join_by_invite", { token });
+    if (error) throw error;
+    return data;
+  });
+}
+
+/** Accept or decline an invite that came by email. */
+export function useRespondInvite() {
+  return useEnterHousehold<{ id: string; accept: boolean }>(async ({ id, accept }) => {
+    const { data, error } = await supabase.rpc("respond_invite", { invite_id: id, accept });
+    if (error) throw error;
+    return data;
+  });
+}
+
+export type InviteByEmailResult = "invited" | "not_found" | "already_member" | "self";
+
+export function useInviteByEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (email: string): Promise<InviteByEmailResult> => {
+      const { data, error } = await supabase.rpc("invite_by_email", { invitee_email: email });
+      if (error) throw error;
+      return data as InviteByEmailResult;
+    },
+    // Inviting from a private list creates the shared one
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["household"] });
+      qc.invalidateQueries({ queryKey: ["shopping"] });
+    },
+  });
+}
+
+/** Owner only: a new link, so the old one stops working. */
+export function useResetInviteLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("reset_invite_link");
+      if (error) throw error;
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["household"] }),
+  });
+}
+
+export type MyInvite = { id: string; inviter: string; memberCount: number };
+
+/**
+ * Invites waiting for me, kept live: a new one shows up without refreshing
+ * (RLS lets each user see only invites addressed to them).
+ */
+export function useMyInvites() {
+  const qc = useQueryClient();
+  // One channel per mounted copy (the banner can be on the page and in the
+  // share sheet at once); a shared name would let one unmount close the other's.
+  const channelId = useId();
+  useEffect(() => {
+    const channel = supabase
+      .channel(`invites-sync-${channelId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "household_invites" }, () => {
+        qc.invalidateQueries({ queryKey: ["my-invites"] });
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [qc, channelId]);
+
+  return useQuery({
+    queryKey: ["my-invites"],
+    queryFn: async (): Promise<MyInvite[]> => {
+      const { data, error } = await supabase.rpc("my_invites");
+      if (error) return []; // migration not run yet: no invites, not an error screen
+      return (data ?? []).map((r) => ({ id: r.id, inviter: r.inviter, memberCount: r.member_count }));
     },
   });
 }

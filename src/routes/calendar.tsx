@@ -255,9 +255,7 @@ function CalendarPage() {
         <>
           {/* Editing is new and invisible until you tap — say so once, where events are */}
           {monthEvents.length > 0 && (
-            <Tip id="edit-event" title="אפשר לערוך כל אירוע" className="mb-4">
-              לחיצה על אירוע, או על העיפרון שלידו, פותחת אותו לשינוי שעה, מקום או תאריך.
-            </Tip>
+            <Tip id="edit-event" className="mb-4" />
           )}
 
           {/* Selected day events */}

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { ArrowDown, ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig, User, ListChecks, CalendarDays, ShoppingCart, Wallet, Briefcase } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { rememberInvite, takePendingInvite } from "@/lib/pending-invite";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>): { redirect?: string; verified?: boolean } => {
@@ -126,9 +127,15 @@ function LoginPage() {
   // client-side navigate: the saved path can carry its own query string
   // ("/expense/new?mode=fixed"), which `navigate({ to })` does not parse.
   const goOn = () => {
-    if (redirect) window.location.replace(redirect);
+    const target = takePendingInvite() ?? redirect;
+    if (target) window.location.replace(target);
     else navigate({ to: "/" });
   };
+
+  // Arrived from an invite link: keep it for after sign-up (see rememberInvite)
+  useEffect(() => {
+    rememberInvite(redirect);
+  }, [redirect]);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
