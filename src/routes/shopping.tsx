@@ -668,6 +668,35 @@ function InviteSection({ canRevoke }: { canRevoke: boolean }) {
 }
 
 
+// Each person keeps one color everywhere, picked from their id
+const PERSON_HUES = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"];
+
+function personHue(userId: string): string {
+  let h = 0;
+  for (const ch of userId) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return `var(${PERSON_HUES[Math.abs(h) % PERSON_HUES.length]})`;
+}
+
+/** The first letter of a profile name in a solid tinted circle (solid so they can overlap). */
+function PersonAvatar({ userId, name, className }: { userId: string; name: string; className?: string }) {
+  const hue = personHue(userId);
+  return (
+    <span
+      className={cn("flex shrink-0 items-center justify-center rounded-full font-bold", className)}
+      style={{ backgroundColor: `color-mix(in oklch, ${hue} 16%, var(--background))`, color: hue }}
+      aria-hidden
+    >
+      {name.charAt(0)}
+    </span>
+  );
+}
+
+/** "דנה" · "דנה ויוסי" · "דנה, יוסי ועוד 2" */
+function partnersLine(names: string[]): string {
+  const shown = names.length > 3 ? [...names.slice(0, 2), `עוד ${names.length - 2}`] : names;
+  return new Intl.ListFormat("he", { type: "conjunction" }).format(shown);
+}
+
 /** Who's in the list, and who's knocking. Owner-only actions. */
 function PeopleList({ isOwner }: { isOwner: boolean }) {
   const { data: people = [] } = useHouseholdPeople(true);
@@ -727,9 +756,7 @@ function PeopleList({ isOwner }: { isOwner: boolean }) {
         <ul className="surface-card divide-y divide-border/50 overflow-hidden rounded-2xl">
           {active.map((p) => (
             <li key={p.userId} className="flex items-center gap-3 px-4 py-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                {p.name.charAt(0)}
-              </span>
+              <PersonAvatar userId={p.userId} name={p.name} className="size-9 text-sm" />
               <span className="min-w-0 flex-1 truncate text-sm font-bold">
                 {p.name}
                 {p.isMe && <span className="text-muted-foreground"> (אתה)</span>}
@@ -858,6 +885,9 @@ function ShareBar({ onOpen }: { onOpen: () => void }) {
   const shared = !!household && household.memberCount > 1;
   const waiting = household?.myStatus === "pending";
   const requests = household?.isOwner ? (household.pendingCount ?? 0) : 0;
+  // Everyone else in the list, by profile name (kept live by useShoppingRealtime)
+  const { data: people = [] } = useHouseholdPeople(shared);
+  const partners = shared ? people.filter((p) => p.status === "active" && !p.isMe) : [];
 
   return (
     <button
@@ -865,20 +895,35 @@ function ShareBar({ onOpen }: { onOpen: () => void }) {
       className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border/80 px-4 py-2.5 text-right transition-colors duration-150 hover-fine:hover:border-primary/40"
       style={{ transitionTimingFunction: EASE }}
     >
-      <span
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full",
-          shared ? "bg-success/12 text-success" : "bg-muted text-muted-foreground"
-        )}
-      >
-        <Users className="size-4" />
-      </span>
-      <span className="flex-1 text-xs font-bold">
+      {partners.length > 0 ? (
+        <span className="flex shrink-0">
+          {partners.slice(0, 3).map((p, i) => (
+            <PersonAvatar
+              key={p.userId}
+              userId={p.userId}
+              name={p.name}
+              className={cn("size-8 border-2 border-background text-xs", i > 0 && "-ms-2.5")}
+            />
+          ))}
+        </span>
+      ) : (
+        <span
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-full",
+            shared ? "bg-success/12 text-success" : "bg-muted text-muted-foreground"
+          )}
+        >
+          <Users className="size-4" />
+        </span>
+      )}
+      <span className="min-w-0 flex-1 truncate text-xs font-bold">
         {waiting
           ? "ממתין לאישור"
-          : shared
-            ? `רשימה משותפת · ${household.memberCount}`
-            : "שתפו את הרשימה"}
+          : partners.length > 0
+            ? `משותפת עם ${partnersLine(partners.map((p) => p.name))}`
+            : shared
+              ? `רשימה משותפת · ${household.memberCount}`
+              : "שתפו את הרשימה"}
       </span>
       {requests > 0 ? (
         <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600">

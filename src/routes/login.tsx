@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowDown, ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig, User, ListChecks, CalendarDays, ShoppingCart, Wallet, Briefcase } from "lucide-react";
+import { ArrowDown, ArrowLeft, Mail, Lock, Eye, EyeOff, Check, CircleCheckBig, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { rememberInvite, takePendingInvite } from "@/lib/pending-invite";
@@ -20,14 +20,6 @@ export const Route = createFileRoute("/login")({
 });
 
 const EASE = "var(--ease-out)";
-
-const FEATURES = [
-  { label: "משימות", icon: ListChecks },
-  { label: "יומן וימי הולדת", icon: CalendarDays },
-  { label: "רשימת קניות משותפת", icon: ShoppingCart },
-  { label: "הוצאות ותקציב", icon: Wallet },
-  { label: "ימי עבודה", icon: Briefcase },
-] as const;
 
 /** Screenshots in public/screens/, 600×1298, taken from the demo account. */
 const TOUR = [
@@ -309,19 +301,6 @@ function LoginPage() {
             </span>
             <p className="mt-4 font-display text-2xl font-extrabold leading-none">נהל הכל</p>
             <p className="mt-2 text-sm text-muted-foreground">כל מה שהיום צריך, באפליקציה אחת</p>
-            {/* What the app actually does — a first-time visitor lands here before
-                anything else, so this is the only place to say it. */}
-            <ul className="mt-4 flex flex-wrap justify-center gap-1.5" aria-label="מה יש באפליקציה">
-              {FEATURES.map(({ label, icon: Icon }) => (
-                <li
-                  key={label}
-                  className="flex items-center gap-1.5 rounded-full bg-primary/8 px-3 py-1 text-xs font-semibold text-primary"
-                >
-                  <Icon className="size-3.5" />
-                  {label}
-                </li>
-              ))}
-            </ul>
             <button
               type="button"
               onClick={() => document.getElementById("tour")?.scrollIntoView({ behavior: scrollBehavior() })}
