@@ -38,18 +38,26 @@ export type Database = {
           year: number | null;
           /** Gift amount in ₪, occasions only. */
           gift: number | null;
+          /** Hebrew date the event repeats on (hebrew-dates-migration.sql). */
+          hebrew_day: number | null;
+          hebrew_month: number | null;
+          hebrew_year: number | null;
           created_at: string;
         };
         // month/occasion/year/gift optional: the insert retries without them on
-        // older databases (occasions-migration.sql adds the last three)
+        // older databases (occasions-migration.sql adds the last three). The
+        // hebrew_* columns are only sent for events that use them.
         Insert: Omit<
           Database["public"]["Tables"]["events"]["Row"],
-          "id" | "created_at" | "month" | "occasion" | "year" | "gift"
+          "id" | "created_at" | "month" | "occasion" | "year" | "gift" | "hebrew_day" | "hebrew_month" | "hebrew_year"
         > & {
           month?: number | null;
           occasion?: string | null;
           year?: number | null;
           gift?: number | null;
+          hebrew_day?: number | null;
+          hebrew_month?: number | null;
+          hebrew_year?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["events"]["Insert"]>;
         Relationships: [];

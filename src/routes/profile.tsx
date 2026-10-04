@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useState, useRef, useEffect } from "react";
 import {
   Camera, Check, Pencil, X, LogOut, Mail, Wallet, User, Trash2,
-  KeyRound, Lightbulb, Cake, PartyPopper, ShoppingCart, ListChecks, CalendarDays, AlertTriangle,
+  KeyRound, Lightbulb, Cake, PartyPopper, ShoppingCart, ListChecks, CalendarDays, AlertTriangle, Flame,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useOccasions } from "@/components/OccasionList";
@@ -20,6 +20,7 @@ import {
   useShoppingItems,
 } from "@/lib/queries";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
+import { CITIES, NO_CITY, setShabbatCity, useShabbatCity } from "@/lib/shabbat-city";
 
 export const Route = createFileRoute("/profile")({
   component: ProfilePage,
@@ -42,6 +43,7 @@ function ProfilePage() {
   const removeAvatar = useRemoveAvatar();
 
   const fileInput = useRef<HTMLInputElement>(null);
+  const shabbatCity = useShabbatCity();
 
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -60,6 +62,14 @@ function ProfilePage() {
     const t = setTimeout(() => setSavedKey(null), 1600);
     return () => clearTimeout(t);
   }, [savedKey]);
+
+  // The city link on the home card lands here (#hebrew-calendar). The section
+  // only exists once the profile has loaded, too late for the router's own
+  // hash scroll, so it's done here.
+  useEffect(() => {
+    if (isLoading || window.location.hash !== "#hebrew-calendar") return;
+    document.getElementById("hebrew-calendar")?.scrollIntoView({ block: "center" });
+  }, [isLoading]);
 
   // Arming a destructive action should time out rather than stay armed.
   useEffect(() => {
@@ -369,6 +379,34 @@ function ProfilePage() {
           )}
           <p className="mt-2 text-xs text-muted-foreground">
             משמש לחישוב ההתקדמות בעמוד הכספים
+          </p>
+        </section>
+
+        {/* ── Hebrew calendar ── the city behind the Shabbat times (home + calendar) ── */}
+        <section id="hebrew-calendar" className="surface-card scroll-mt-24 rounded-3xl p-5">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="eyebrow flex items-center gap-1.5">
+              <Flame className="size-3.5" />
+              זמני שבת וחג
+            </p>
+            <SavedTick show={savedKey === "city"} />
+          </div>
+          <select
+            value={shabbatCity ?? NO_CITY}
+            onChange={(e) => {
+              setShabbatCity(e.target.value);
+              setSavedKey("city");
+            }}
+            className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary/40"
+            aria-label="עיר לזמני שבת"
+          >
+            <option value={NO_CITY}>לא להציג</option>
+            {CITIES.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-muted-foreground">
+            בחירת עיר מציגה בדף הבית ובלוח השנה הדלקת נרות, יציאה והחג הקרוב
           </p>
         </section>
 

@@ -21,6 +21,19 @@ import {
   splitOccasionTitle,
   type OccasionType,
 } from "@/lib/occasions";
+import {
+  HEBREW_MONTH_CHOICES,
+  currentMonthChoice,
+  daysInChoice,
+  hasHebrewDate,
+  hebrewDateLabel,
+  hebrewFieldsLabel,
+  hebrewFieldsOf,
+  hebrewNumeral,
+  monthChoiceOf,
+  nextHebrewOccurrence,
+  type HebrewMonthChoice,
+} from "@/lib/hebrew-date";
 
 export const Route = createFileRoute("/event/new")({
   validateSearch: (
@@ -83,9 +96,44 @@ function hebrewDate(dateStr: string): string {
  * before the month column show in the current month.
  */
 function eventDateISO(e: CalEvent): string {
+  // Its stored day/month is one past occurrence; the date input wants the next
+  const next = hasHebrewDate(e) ? nextHebrewOccurrence(e) : null;
+  if (next) return toISO(next);
   const y = e.year ?? today.getFullYear();
   const m = e.month ?? today.getMonth() + 1;
   return `${y}-${String(m).padStart(2, "0")}-${String(e.day).padStart(2, "0")}`;
+}
+
+function toISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Fields that switch a saved event off the Hebrew date. */
+const NO_HEBREW_DATE = { hebrew_day: null, hebrew_month: null, hebrew_year: null };
+
+/** The "לפי התאריך העברי" switch, shared by the birthday and event forms. */
+function HebrewDateToggle({ on, onChange, hint }: { on: boolean; onChange: (v: boolean) => void; hint: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold">לפי התאריך העברי</span>
+        <span className="block text-xs text-muted-foreground">{hint}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="לפי התאריך העברי"
+        onClick={() => onChange(!on)}
+        className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", on ? "bg-primary" : "bg-muted")}
+      >
+        <span className={cn(
+          "absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform",
+          on ? "translate-x-5" : "translate-x-0.5"
+        )} />
+      </button>
+    </div>
+  );
 }
 
 /** After saving an edit: back to the screen it was opened from. */
@@ -107,10 +155,33 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
     editing?.month ? editing.month - 1 : today.getMonth()
   ); // 0-based
   const [selectedDay, setSelectedDay] = useState<number | null>(editing?.day ?? null);
+  // A Hebrew birthday is picked as a Hebrew month + day instead
+  const wasHebrew = !!editing && hasHebrewDate(editing);
+  const [hebrew, setHebrew] = useState(wasHebrew);
+  const [hChoice, setHChoice] = useState<HebrewMonthChoice>(() =>
+    editing && hasHebrewDate(editing) ? monthChoiceOf(editing.hebrew_month, editing.hebrew_year) : currentMonthChoice()
+  );
+  const [hDay, setHDay] = useState<number | null>(editing?.hebrew_day ?? null);
   const [error, setError] = useState("");
   const [savedName, setSavedName] = useState<string | null>(null);
   const { birthdays } = useBirthdays();
   const busy = addEvent.isPending || updateEvent.isPending;
+
+  // The Hebrew date to save. An unchanged one keeps its stored year (a real
+  // birth year, when it came from the event form) rather than the stand-in.
+  const hebrewFields = hebrew && hDay
+    ? {
+        hebrew_day: hDay,
+        hebrew_month: hChoice.month,
+        hebrew_year:
+          editing && hasHebrewDate(editing) && editing.hebrew_day === hDay &&
+          monthChoiceOf(editing.hebrew_month, editing.hebrew_year).id === hChoice.id
+            ? editing.hebrew_year
+            : hChoice.year,
+      }
+    : null;
+  const hebrewNext = hebrewFields ? nextHebrewOccurrence({ title: "", ...hebrewFields }) : null;
+  const ready = hebrew ? !!hebrewNext : !!selectedDay;
 
   // Leap-year reference (2024) on purpose: a 29 Feb birthday must stay
   // selectable in every year, not just leap years.
@@ -124,16 +195,20 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError("נא להזין שם"); return; }
-    if (!selectedDay) { setError("נא לבחור יום"); return; }
+    if (!ready) { setError("נא לבחור יום"); return; }
     setError("");
+
+    // A Hebrew birthday keeps this year's Gregorian date in day/month too
+    const date = hebrew && hebrewNext
+      ? { day: hebrewNext.getDate(), month: hebrewNext.getMonth() + 1, ...hebrewFields }
+      : { day: selectedDay!, month: selectedMonth + 1, ...(wasHebrew ? NO_HEBREW_DATE : {}) };
 
     if (editing) {
       try {
         await updateEvent.mutateAsync({
           id: editing.id,
           title: `יום הולדת ל${name.trim()}`,
-          day: selectedDay,
-          month: selectedMonth + 1,
+          ...date,
           is_birthday: true,
         });
         leaveEdit();
@@ -146,8 +221,7 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
     try {
       await addEvent.mutateAsync({
         title: `יום הולדת ל${name.trim()}`,
-        day: selectedDay,
-        month: selectedMonth + 1,
+        ...date,
         time: "כל היום",
         end_time: null,
         location: null,
@@ -159,6 +233,7 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
       setSavedName(name.trim());
       setName("");
       setSelectedDay(null);
+      setHDay(null);
     } catch (err) {
       // Previously unhandled: a failed insert did nothing and the birthday was lost
       setError(`השמירה נכשלה: ${(err as Error).message ?? "נסה שוב"}`);
@@ -212,6 +287,67 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
         />
       </div>
 
+      <div style={{ animation: `fade-up 280ms ${ease} 100ms both` }}>
+        <HebrewDateToggle
+          on={hebrew}
+          onChange={setHebrew}
+          hint="יום הולדת עברי, כמו ט״ו באב. זז כל שנה בלוח הלועזי"
+        />
+      </div>
+
+      {hebrew ? (
+        <>
+          {/* Hebrew months — Adar I / II only matter for someone born in a leap year */}
+          <div style={{ animation: `fade-up 220ms ${ease} both` }}>
+            <p className="text-sm font-semibold mb-2.5">חודש עברי</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {HEBREW_MONTH_CHOICES.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    setHChoice(c);
+                    setHDay((d) => (d !== null && d > daysInChoice(c) ? null : d));
+                  }}
+                  className={cn(
+                    "rounded-xl py-2.5 text-xs font-bold transition-[transform,background-color,color] active:scale-[0.90]",
+                    hChoice.id === c.id
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "bg-muted text-foreground hover:bg-primary/12 hover:text-primary"
+                  )}
+                  style={{ transitionTimingFunction: ease, transitionDuration: "140ms" }}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ animation: `fade-up 220ms ${ease} 40ms both` }}>
+            <p className="text-sm font-semibold mb-2.5">יום</p>
+            <div className="grid grid-cols-7 gap-1.5">
+              {Array.from({ length: daysInChoice(hChoice) }, (_, i) => i + 1).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setHDay(d === hDay ? null : d)}
+                  className={cn(
+                    "aspect-square rounded-xl text-sm font-bold transition-[transform,background-color,color] active:scale-[0.85]",
+                    hDay === d
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-foreground hover:bg-primary/12 hover:text-primary"
+                  )}
+                  style={{ transitionTimingFunction: ease, transitionDuration: "140ms" }}
+                  aria-label={`${d}`}
+                >
+                  {hebrewNumeral(d)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      ) : (
+      <>
       {/* Month grid — 4×3, all months visible */}
       <div style={{ animation: `fade-up 280ms ${ease} 120ms both` }}>
         <p className="text-sm font-semibold mb-2.5">חודש</p>
@@ -267,9 +403,25 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
           ))}
         </div>
       </div>
+      </>
+      )}
 
       {/* Summary */}
-      {selectedDay && name.trim() && (
+      {hebrew && hebrewFields && hebrewNext && name.trim() ? (
+        <div
+          className="flex items-center gap-3 rounded-2xl border border-success/30 bg-success/8 px-4 py-3"
+          style={{ animation: `fade-up 220ms ${ease} both` }}
+        >
+          <span className="text-2xl">🎂</span>
+          <div>
+            <p className="text-sm font-bold">יום הולדת ל{name.trim()}</p>
+            <p className="text-xs text-muted-foreground">
+              {hebrewFieldsLabel({ title: "", ...hebrewFields })} · הפעם ב-
+              {hebrewNext.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" })}
+            </p>
+          </div>
+        </div>
+      ) : !hebrew && selectedDay && name.trim() && (
         <div
           className="flex items-center gap-3 rounded-2xl border border-success/30 bg-success/8 px-4 py-3"
           style={{ animation: `fade-up 220ms ${ease} both` }}
@@ -286,7 +438,7 @@ function BirthdayForm({ editing }: { editing?: CalEvent | undefined }) {
 
       <button
         type="submit"
-        disabled={busy || !name.trim() || !selectedDay}
+        disabled={busy || !name.trim() || !ready}
         className="w-full rounded-2xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition-[transform,opacity] active:scale-[0.97] disabled:opacity-40"
         style={{ transitionTimingFunction: ease, transitionDuration: "160ms" }}
       >
@@ -618,6 +770,10 @@ function EventForm({
   const [endTime, setEndTime] = useState(editing?.end_time ?? "");
   const [location, setLocation] = useState(editing?.location ?? "");
   const [category, setCategory] = useState<string>(editing?.category ?? "work");
+  // Repeats every year on the Hebrew date — a yahrzeit, a Hebrew anniversary
+  const wasHebrew = !!editing && hasHebrewDate(editing);
+  const [hebrew, setHebrew] = useState(wasHebrew);
+  const [dateTouched, setDateTouched] = useState(false);
   const [error, setError] = useState("");
   const detected = detectOccasion(title);
   const busy = addEvent.isPending || updateEvent.isPending;
@@ -629,6 +785,11 @@ function EventForm({
     setError("");
 
     const d = new Date(date + "T00:00:00");
+    // Switched on: the Hebrew date of the chosen day. Already on and the date
+    // untouched: keep what's stored (the original date, not this year's).
+    const hebrewDate = hebrew
+      ? (wasHebrew && !dateTouched ? {} : hebrewFieldsOf(d))
+      : wasHebrew ? NO_HEBREW_DATE : {};
 
     if (editing) {
       try {
@@ -648,6 +809,7 @@ function EventForm({
           end_time: (!allDay && endTime) ? endTime : null,
           location: location.trim() || null,
           category,
+          ...hebrewDate,
         });
         leaveEdit();
       } catch (err) {
@@ -670,6 +832,7 @@ function EventForm({
         location: location.trim() || null,
         category,
         is_birthday: false,
+        ...hebrewDate,
       });
       navigate({ to: "/calendar" });
     } catch (err) {
@@ -702,10 +865,20 @@ function EventForm({
         <input
           type="date"
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={(e) => { setDate(e.target.value); setDateTouched(true); }}
           className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>
+
+      <HebrewDateToggle
+        on={hebrew}
+        onChange={setHebrew}
+        hint={
+          hebrew && date
+            ? `חוזר כל שנה ב${wasHebrew && !dateTouched && editing ? hebrewFieldsLabel(editing) : hebrewDateLabel(new Date(date + "T00:00:00"))}`
+            : "חוזר כל שנה בתאריך העברי, למשל אזכרה"
+        }
+      />
 
       <div className="flex items-center justify-between rounded-2xl border border-border bg-card px-4 py-3">
         <span className="text-sm font-semibold">כל היום</span>

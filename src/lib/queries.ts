@@ -2,6 +2,7 @@ import { useEffect, useId } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import { categories, SITE_URL, type CategoryKey } from "./config";
+import { hasHebrewDate, hebrewOccurrencesIn } from "./hebrew-date";
 
 // Helper: safe category lookup
 export function getCat(category: string) {
@@ -54,6 +55,13 @@ export type CalEvent = {
   year?: number | null;
   /** Gift amount in ₪. */
   gift?: number | null;
+  // Set together, on events that repeat by the Hebrew date (a Hebrew birthday,
+  // a yahrzeit); undefined until hebrew-dates-migration.sql runs. See
+  // lib/hebrew-date.ts — day/month then only hold the occurrence it was saved for.
+  hebrew_day?: number | null;
+  hebrew_month?: number | null;
+  /** The Hebrew year of the original date, or a stand-in when it isn't known. */
+  hebrew_year?: number | null;
   created_at: string;
 };
 
@@ -75,6 +83,7 @@ function inYear(e: CalEvent, year: number): boolean {
 
 /** Does this event belong to the given month (1-12) of the given year? */
 export function inMonth(e: CalEvent, month: number, year: number): boolean {
+  if (hasHebrewDate(e)) return hebrewOccurrencesIn(e, year).some((d) => d.getMonth() + 1 === month);
   if (!inYear(e, year)) return false;
   return e.month == null || e.month === month;
 }
@@ -91,6 +100,10 @@ export function inMonth(e: CalEvent, month: number, year: number): boolean {
  * their old "matches any month" behaviour so existing data doesn't vanish.
  */
 export function occursOn(e: CalEvent, day: number, month: number, year: number): boolean {
+  // A Hebrew date lands on a different Gregorian day every year
+  if (hasHebrewDate(e)) {
+    return hebrewOccurrencesIn(e, year).some((d) => d.getDate() === day && d.getMonth() + 1 === month);
+  }
   if (e.day !== day) return false;
   if (!inYear(e, year)) return false;
 
@@ -207,6 +220,11 @@ async function writeEvent(
     const missing = OPTIONAL_EVENT_COLUMNS.find(
       (c) => c in row && new RegExp(`\\b${c}\\b`, "i").test(error.message ?? ""),
     );
+    // Not dropped like the others: saved without them, a Hebrew birthday would
+    // quietly turn into a Gregorian one
+    if (/\bhebrew_(day|month|year)\b/.test(error.message ?? "")) {
+      throw new Error("תאריך עברי עוד לא זמין במסד הנתונים (hebrew-dates-migration.sql)");
+    }
     if (!missing) throw error;
     const { [missing]: _drop, ...rest } = row;
     row = rest;

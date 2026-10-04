@@ -9,7 +9,10 @@ import { useEvents, useDeleteEvent, getCat, occursOn, inMonth } from "@/lib/quer
 import { useScope, inScope } from "@/lib/scope";
 import { cn } from "@/lib/utils";
 import type { CalEvent } from "@/lib/queries";
-import { getHolidaysForMonth, getHolidaysForDay } from "@/lib/holidays";
+import {
+  getHolidaysForMonth, getHolidaysForDay, hebrewDayOfMonth, hebrewDateLabel, hebrewMonthsOf,
+  useShabbatCity, zmanimOn, cityLabel,
+} from "@/lib/jewish-calendar";
 
 export const Route = createFileRoute("/calendar")({
   component: CalendarPage,
@@ -30,6 +33,7 @@ const ease = "cubic-bezier(0.23, 1, 0.32, 1)";
 function CalendarPage() {
   const { data: events = [], isLoading } = useEvents();
   const { scope } = useScope();
+  const city = useShabbatCity();
 
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedDay, setSelectedDay] = useState<number | null>(todayDay);
@@ -84,6 +88,10 @@ function CalendarPage() {
   const selectedDayHolidays = selectedDay !== null
     ? getHolidaysForDay(displayYear, displayMonth + 1, selectedDay)
     : [];
+  // Candle lighting / havdalah on the selected day, for the chosen city
+  const selectedZmanim = selectedDay !== null
+    ? zmanimOn(city, new Date(displayYear, displayMonth, selectedDay))
+    : {};
 
   const dayHasEvent = (d: number) =>
     scopedEvents.some((e) => occursOn(e, d, displayMonthNum, displayYear));
@@ -92,10 +100,12 @@ function CalendarPage() {
   const isCurrentMonth = monthOffset === 0;
   const isPast = (d: number) => isCurrentMonth && d < todayDay;
 
+  /** "היום · כ״ג בתשרי" / "יום שני, 5 באוקטובר · כ״ד בתשרי" */
   function dayLabel(day: number): string {
-    if (isCurrentMonth && day === todayDay) return "היום";
     const d = new Date(displayYear, displayMonth, day);
-    return d.toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" });
+    const hebrew = hebrewDateLabel(d);
+    if (isCurrentMonth && day === todayDay) return `היום · ${hebrew}`;
+    return `${d.toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" })} · ${hebrew}`;
   }
 
   return (
@@ -181,11 +191,16 @@ function CalendarPage() {
         </button>
         <button
           onClick={() => setShowMonthPicker(true)}
-          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-bold text-foreground transition-[transform,background-color] duration-[160ms] active:scale-[0.95] active:bg-muted"
+          className="flex flex-col items-center rounded-xl px-3 py-1 transition-[transform,background-color] duration-[160ms] active:scale-[0.95] active:bg-muted"
           style={{ transitionTimingFunction: ease }}
         >
-          {monthLabel}
-          <ChevronLeft className="size-3.5 text-muted-foreground rotate-90" />
+          <span className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+            {monthLabel}
+            <ChevronLeft className="size-3.5 text-muted-foreground rotate-90" />
+          </span>
+          <span className="text-[11px] font-semibold text-muted-foreground">
+            {hebrewMonthsOf(displayYear, displayMonth + 1)}
+          </span>
         </button>
         <button
           onClick={() => { setMonthOffset((m) => m - 1); setSelectedDay(null); }}
@@ -221,20 +236,29 @@ function CalendarPage() {
               key={day}
               onClick={() => setSelectedDay(day === selectedDay ? null : day)}
               className={cn(
-                "flex flex-col items-center gap-0.5 py-1 rounded-xl transition-[transform,background-color,color] duration-[160ms] active:scale-[0.88]",
+                "relative flex flex-col items-center py-1 rounded-xl transition-[transform,background-color,color] duration-[160ms] active:scale-[0.88]",
                 isSelected && "bg-primary text-primary-foreground",
                 !isSelected && isToday && "bg-primary/12 text-primary",
                 past && !isSelected && "opacity-40"
               )}
               style={{ transitionTimingFunction: ease }}
             >
+              {/* In the corner, so a holiday doesn't push its number out of line */}
               {hasHoliday && !isSelected && (
-                <span className="text-[9px] leading-none">{holidayEmoji}</span>
+                <span className="absolute top-0 left-0.5 text-[9px] leading-none" aria-hidden>{holidayEmoji}</span>
               )}
               <span className={cn("text-sm font-bold leading-tight", isSelected && "text-primary-foreground", !isSelected && isToday && "text-primary")}>
                 {day}
               </span>
-              <span className="flex gap-0.5 h-1.5 items-center">
+              <span
+                className={cn(
+                  "text-[9px] font-semibold leading-tight",
+                  isSelected ? "text-primary-foreground/75" : "text-muted-foreground"
+                )}
+              >
+                {hebrewDayOfMonth(new Date(displayYear, displayMonth, day))}
+              </span>
+              <span className="mt-0.5 flex gap-0.5 h-1.5 items-center">
                 {hasEvent && (
                   <span className={cn("size-1.5 rounded-full transition-colors duration-200", isSelected ? "bg-primary-foreground/70" : "bg-primary")} />
                 )}
@@ -294,6 +318,23 @@ function CalendarPage() {
                       )}>{h.name}</span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Shabbat / holiday times on this day, for the chosen city */}
+              {(selectedZmanim.candles || selectedZmanim.havdalah) && (
+                <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-amber-200/60 bg-amber-50/60 px-4 py-2.5 text-xs">
+                  <span className="text-base" aria-hidden>🕯️</span>
+                  {selectedZmanim.parsha && <span className="font-bold">{selectedZmanim.parsha}</span>}
+                  {selectedZmanim.candles && (
+                    <span>הדלקת נרות <span className="font-bold tabular-nums">{selectedZmanim.candles}</span></span>
+                  )}
+                  {selectedZmanim.havdalah && (
+                    <span>יציאה <span className="font-bold tabular-nums">{selectedZmanim.havdalah}</span></span>
+                  )}
+                  <Link to="/profile" hash="hebrew-calendar" className="mr-auto text-muted-foreground underline-offset-2 hover:underline">
+                    {cityLabel(city ?? "")}
+                  </Link>
                 </div>
               )}
 
@@ -363,8 +404,10 @@ function CalendarPage() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {[...new Set(monthEvents.map((e) => e.day))]
-                    .sort((a, b) => a - b)
+                  {/* Every day of the month that has something — not e.day, which
+                      a Hebrew-dated event doesn't keep from year to year */}
+                  {Array.from({ length: daysInMonth }, (_, i) => i + 1)
+                    .filter((day) => monthEvents.some((e) => occursOn(e, day, displayMonthNum, displayYear)))
                     .map((day) => (
                     <div key={day}>
                       <p className="eyebrow mb-2">{dayLabel(day)}</p>

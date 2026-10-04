@@ -12,7 +12,13 @@ import { getHistory } from "@/lib/shopping-smart";
 import { WorkStatusButtons, WorkStatusChip } from "@/components/WorkDayPicker";
 import { shekel, DEFAULT_MONTHLY_BUDGET } from "@/lib/config";
 import { taskBucket, daysLate, lateLabel, BUCKET_LABEL, BUCKET_ORDER } from "@/lib/task-status";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
+
+// The Hebrew-calendar card brings ~50 kB of calendar maths; loaded on its own
+// so the rest of the page doesn't wait for it
+const JewishDayCard = lazy(() =>
+  import("@/components/JewishDayCard").then((m) => ({ default: m.JewishDayCard }))
+);
 
 // taste-skill: strong ease-out for all transitions
 const ease = "cubic-bezier(0.23, 1, 0.32, 1)";
@@ -357,6 +363,10 @@ function Today() {
         />
 
         <TipsCard />
+
+        <Suspense fallback={null}>
+          <JewishDayCard />
+        </Suspense>
 
         {/* ── Daily work-status question ── */}
         <section

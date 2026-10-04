@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import { useEvents, useDeleteEvent, type CalEvent } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { EditEventButton } from "@/components/EditEventButton";
+import { hasHebrewDate, hebrewFieldsLabel, nextHebrewOccurrence } from "@/lib/hebrew-date";
 
 /**
  * The saved-birthdays list. Shared by the /birthdays page and the bottom of the
@@ -47,6 +48,15 @@ export function extractName(title: string) {
   return title.replace(/^\s*יום הולדת\s*(של\s*|ל)?/, "").trim() || title;
 }
 
+/** Days to a Hebrew birthday: its date moves every year. */
+function daysUntilHebrew(e: CalEvent): number {
+  const next = nextHebrewOccurrence(e);
+  if (!next) return NO_DATE;
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((next.getTime() - startOfToday.getTime()) / 86_400_000);
+}
+
 export type Birthday = CalEvent & { daysUntil: number };
 
 /**
@@ -57,7 +67,7 @@ export function useBirthdays() {
   const { data: events = [], isLoading } = useEvents();
   const birthdays: Birthday[] = events
     .filter((e) => e.is_birthday || /^\s*יום הולדת/.test(e.title))
-    .map((e) => ({ ...e, daysUntil: daysUntilBirthday(e.month, e.day) }))
+    .map((e) => ({ ...e, daysUntil: hasHebrewDate(e) ? daysUntilHebrew(e) : daysUntilBirthday(e.month, e.day) }))
     .sort((a, b) => a.daysUntil - b.daysUntil);
   return { birthdays, isLoading };
 }
@@ -87,6 +97,7 @@ export function BirthdayList({ birthdays }: { birthdays: Birthday[] }) {
     const name = extractName(b.title);
     const { text, color } = countdownLabel(b.daysUntil);
     const monthLabel = b.month ? HE_MONTHS[b.month - 1] : "";
+    const hebrew = hasHebrewDate(b);
     const isConfirm = confirmId === b.id;
     return (
       <div
@@ -110,7 +121,9 @@ export function BirthdayList({ birthdays }: { birthdays: Birthday[] }) {
         )}
         <Link to="/event/new" search={{ type: "event", edit: b.id }} className="flex-1 min-w-0">
           <p className="text-sm font-bold truncate">{name}</p>
-          {monthLabel && (
+          {hebrew ? (
+            <p className="text-xs text-muted-foreground">{hebrewFieldsLabel(b)} · לפי התאריך העברי</p>
+          ) : monthLabel && (
             <p className="text-xs text-muted-foreground">{b.day} ב{monthLabel}</p>
           )}
         </Link>
